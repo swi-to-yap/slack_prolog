@@ -33,9 +33,10 @@ Install..
 
 slack_token('xoxb-130154379991-ogFL0OFP3w6AwdJuK7wLojpK').
 
-4) use_module(library(prolog_client)).
+4) use_module(library(slack_client)).
 
 5)  slack_chat('username', "some message").
+
 
 
 TODO: add event hooks for users
