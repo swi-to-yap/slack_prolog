@@ -1,3 +1,28 @@
+/* <module> slack_client
+% Provides a websocket API to slack
+
+
+Created initial Prolog Language Bindings.  
+
+https://github.com/swi-to-yap/slack_prolog/
+
+
+I am developing a MUD in prolog and needed it so team members could play the MUD chatting a bot.
+
+
+It works .
+
+getting data over the RTM.
+Posts over the https.
+
+Still has a way to go but it gets users started by seeing how easy it was.
+If you could list it on Language API bindings that be great!
+Thank you in advance
+
+Douglas Miles
+Dec 13, 2035
+
+*/
 
 :- module(slack_client, [
         slack_start_listener/0,
