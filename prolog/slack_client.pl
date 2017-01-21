@@ -22,6 +22,12 @@ Thank you in advance
 Douglas Miles
 Dec 13, 2035
 
+
+root@ubuntu:/mnt/dddd/workspace/runtime# cat .slack_auth.pl
+
+slack_token('xoxb-130154379991-ogFL0OFP3w6AwdJuK7wLojpK').
+
+
 */
 
 :- module(slack_client, [
@@ -68,6 +74,8 @@ is_thread_running(ID):-
    (What==running->true;(thread_join(ID,_ ),!,fail)).
 
 
+
+:- if( \+ current_predicate( slack_token/1 )).
 :- if(exists_file('.slack_auth.pl')).
 :- include('.slack_auth.pl').
 :- else.
@@ -75,10 +83,13 @@ is_thread_running(ID):-
 :- include('~/.slack_auth.pl').
 :- endif.
 :- endif.
+:- endif.
 
 
 %  throws if missing
 :- slack_token(_).
+
+
 slack_token_string(S):-slack_token(T),atom_string(T,S).
 
 
@@ -303,4 +314,14 @@ any_to_curls(A,A).
 
 slack_send(WsOutput,Data):- format(WsOutput,'~q',[Data]),format(user_error,'~N ~q ~n',[Data]),!.
 
+
+% start slack listener in a thread
+:- if(( \+ (is_thread_running(slack_start_listener)))).
+:- thread_create(slack_start_listener,_,[alias(slack_start_listener)]).
+:- endif.
+
+% if the above fails .. run in debug mode
+:- if(( \+ (is_thread_running(slack_start_listener)))).
+:- rtrace(slack_start_listener).
+:- endif.
 
