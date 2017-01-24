@@ -5,7 +5,7 @@ This library provides a websocket API to slack
 
 https://github.com/swi-to-yap/slack_prolog/
 
-![](slack.png)
+![](t/slack.png)
 
 ## Useful to Me?
 
@@ -101,10 +101,11 @@ channels | A hash of channel objects, one for every channel visible to the authe
 groups   | A hash of group objects, one for every group the authenticated user is in.
 ims      | A hash of IM objects, one for every direct message channel visible to the authenticated user.
 bots     | Details of the integrations set up on this team.
-text     | textual utils
-debug    | Debugger fidling
-events   | Registered callbacks
-files    | registered storage 
+text     | textual utils.
+debug    | Debugger fidling.
+events   | Registered callbacks.
+files    | registered storage.
+         |
 
 It also tracks changes, such as users being renamed, added or deleted, therefore `?- $Client.users` is always up-to-date.
 
