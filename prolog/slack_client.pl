@@ -1,8 +1,9 @@
 :- module(slack_client, [
         slack_start_listener/0,
-        slack_chat/2,
+        slack_say/2,
         slack_send/1,
         slack_ping/0,
+        slack_get_websocket/1,
         is_thread_running/1,
         slack_ensure_im/2,
         name_to_id/2
@@ -47,11 +48,12 @@ if_debug(_).
 dmsg(O):- dmsg('~w~n',[O]).
 dmsg(F,Args):- if_debug((fresh_line, format(user_error,F,Args))).
 
+:- endif.
+
+
 is_thread_running(ID):-
   is_thread(ID), thread_property(ID,status(What)),!,
    (What==running->true;(thread_join(ID,_ ),!,fail)).
-
-:- endif.
 
 
 :- dynamic(slack_token/1).
@@ -98,7 +100,7 @@ slack_get_websocket_url(URL):-
   dict_pairs(Term,_,Pairs),
   must(maplist(slack_receive(rtm),Pairs)),
   URL=Term.url,
-  listing(slack_inform/3),
+  listing(slack_info/3),
   close(In).
 
 :- dynamic(slack_websocket/3).
@@ -133,7 +135,7 @@ skip_propname(var).
 slack_propname(Type,var):-var(Type),!.
 slack_propname(Type,K):-string(Type),!,string_to_atom(Type,K).
 slack_propname(Key-Type,NewType):-!,slack_propname(Key,Type,NewType).
-slack_propname(Key.Type,NewType):-!,slack_propname(Key,Type,NewType).
+%slack_propname(Dict,NewType):- nonvar(Dict),Dict=Key.Type,nonvar(Type),!,slack_propname(Key,Type,NewType).
 slack_propname(Key,Key).
 
 slack_propname(Type,Key,NewType):- skip_propname(Type),!,slack_propname(Key,NewType).
@@ -141,14 +143,17 @@ slack_propname(Key,Type,NewType):- skip_propname(Type),!,slack_propname(Key,NewT
 slack_propname(_Type,Key,NewType):-slack_propname(Key,NewType).
 
 
-slack_start_listener:-
+slack_start_listener:- is_thread_running(slack_start_listener),!,mmake.
+slack_start_listener:- thread_create(slack_listener_proc,_,[alias(slack_start_listener)]),!.
+
+slack_listener_proc:-
  call_cleanup((
   repeat,
   once(slack_get_websocket(WS)),
   once(ws_receive(WS,Data,[format(json)])),
   (Data==
     end_of_file->!;
-  (once(slack_receive(rtm_e,Data)),fail))),
+  (once(slack_receive(rtm_e,Data)),flush_output,fail))),
   slack_remove_websocket(WS)).
 
 
@@ -171,17 +176,20 @@ slack_event(Type,O):- is_dict(O),O.Key=Data,Key=data,!,slack_receive(Type,Data),
 % typify the data objects
 slack_event(rtm_e,O):- is_dict(O),O.Key=Type,Key=type,!,slack_receive(Type,O),!.
 
+
+% text:"This content can't be displayed."
+
 % Notice newly created IMs
-slack_event(im_open,Dict):-
+slack_event(im_open,Dict):- is_dict(Dict),
   Dict.channel=IDI,
   Dict.user=User,
   undict(IDI,ID),
   string_to_atom(ID,IDA),
-  asserta(slack_inform(ims, instance, IDA)),
-  asserta(slack_inform(IDA, id, ID)),
-  asserta(slack_inform(IDA, user, User)).
+  add_slack_info(ims, instance, IDA),
+  add_slack_info(IDA, id, ID),
+  add_slack_info(IDA, user, User).
 
-slack_event(_,end_of_file):- throw(slack_event(rtm_e,end_of_file)).
+slack_event(Evt,end_of_file):- throw(slack_event(Evt,end_of_file)).
 
 
 % slack_event(Type,Data):-add_slack_info(now,Type,Data).
@@ -189,13 +197,13 @@ slack_event(_,end_of_file):- throw(slack_event(rtm_e,end_of_file)).
 slack_unused(user_typing).
 slack_unused(reconnect_url).
 
-slack_receive(Type,Data):- string(Data),(string_to_dict(Data,Dict)->true;string_to_atom(Data,Dict)),!,slack_receive(Type,Dict).
+slack_receive(Type,Data):- (string(Data),(string_to_dict(Data,Dict)->true;string_to_atom(Data,Dict)))->slack_receive(Type,Dict),!.
 slack_receive(Type,Data):- slack_propname(Type,NewType)-> Type\==NewType,!,slack_receive(NewType,Data).
-slack_receive(Type,Dict):- type_to_url(K,Type),!, slack_receive(K,Dict).
+slack_receive(Type,Dict):- type_to_url(K,Type)-> K\==Type,!, slack_receive(K,Dict).
 slack_receive(Type,Data):- slack_event(Type,Data),!.
 slack_receive(Type,Data):- slack_inform(Type,Data),!.
-slack_receive(Type,Data):- slack_unused(Type), nop(dmsg(unused(slack_receive(Type,Data)))).
-slack_receive(Type,Data):- dmsg(unknown(slack_receive(Type,Data))).
+slack_receive(Type,Data):- slack_unused(Type), nop(dmsg(unused(slack_receive(Type,Data)))),!.
+slack_receive(Type,Data):- fmt(unknown(slack_receive(Type,Data))).
 
 
 
@@ -204,58 +212,94 @@ slack_receive(Type,Data):- dmsg(unknown(slack_receive(Type,Data))).
 slack_inform(Type,Data):-is_dict(Data),Data.Key=ID,Key=id,!,string_to_atom(ID,Atom),
    add_slack_info(Type,Atom,Data).
 slack_inform(rtm,Data):- is_list(Data),!, maplist(slack_receive(rtm),Data).
+
+
 slack_inform(Type,Key-[A|Data]):-is_dict(A),is_list(Data),!,maplist(slack_receive(Type-Key),[A|Data]).
+
+slack_inform(Type,Key-Data):- % atomic(Key),atomic_list_concat([Type,Key],'_',TypeKey),fmt(list(slack_receive(TypeKey,Data))),
+  is_list(Data),!,
+  retractall(slack_info(Type,Key,_)),
+  maplist(add_slack_info1(Type,Key),Data).
+
 slack_inform(Type,Key-Data):- atomic(Data),add_slack_info(Type,Key,Data).
 slack_inform(Type,Key-Data):- is_dict(Data),dict_pairs(Data,Tag,Pairs),maplist(slack_receive(Type-Key-Tag),Pairs).
+slack_inform(Type,Key-Data):- add_slack_info(Type,Key,Data).
 
 
 
-add_slack_info(Type,ID,Data):- is_dict(Data),dict_pairs(Data,_Tag,Pairs),!, add_slack_info1(Type,instance,ID),
-   maplist(add_slack_info1(Type,ID),Pairs).
-add_slack_info(Type,ID,Data):-add_slack_info1(Type,ID,Data).
+add_slack_info(Type,ID,Data):- is_dict(Data),dict_pairs(Data,_Tag,Pairs),!, 
+   add_slack_info(Type,instance,ID),
+   maplist(add_slack_info(Type,ID),Pairs).
+add_slack_info(Type,ID,K-V):- atom(Type),!,add_slack_info(ID,K,V).
+add_slack_info(Type,ID,Data):-
+  retractall(slack_info(Type,ID,_)),
+  add_slack_info1(Type,ID,Data).
 
-add_slack_info1(Type,ID,K-V):- atom(Type),!,add_slack_info1(ID,K,V).
-add_slack_info1(Type,ID,Data):-assert(slack_info(Type,ID,Data)).
 
+add_slack_info1(Type,ID,Data):- assert(slack_info(Type,ID,Data)),
+ fmt(assert(slack_info(Type,ID,Data))).
 
-name_to_id(Name,ID):-text_to_string(Name,NameS),slack_inform(ID,name,NameS),!.
-name_to_id(Name,ID):-text_to_string(Name,NameS),slack_inform(_,instance,ID), slack_inform(ID,_,NameS),!.
+get_slack_info(Type,ID,Data):- slack_info(Type,ID,Data)*->true;get_slack_info2(Type,ID,Data).
+
+get_slack_info2(Type,ID,Data):- string(Type),atom_string(Type,Atom),!,get_slack_info(Atom,ID,Data).
+get_slack_info2(Type,ID,Data):- atom(Data),atom_string(Data,String),!,get_slack_info(Type,ID,String).
+
+name_to_id(Name,ID):-text_to_string(Name,NameS),get_slack_info(ID,name,NameS),team\==ID,!.
+%name_to_id(Name,ID):-text_to_string(Name,NameS),get_slack_info(_,instance,ID), get_slack_info(ID,_,NameS),!.
 
 same_ids(ID,IDS):-text_to_string(ID,IDA),text_to_string(IDS,IDB),IDA==IDB.
 
-slack_ensure_im2(To,IM):- name_to_id(To,ID), slack_inform(IM,user,IDS),same_ids(ID,IDS),slack_inform(ims,instance,IM),!.
+slack_ensure_im2(ID,IM):- get_slack_info(IM,user,ID),!.
+
+slack_ensure_im(To,IM):- get_slack_info(IM, name, To), get_slack_info(IM, is_channel, true),!.
+slack_ensure_im(To,IM):- name_to_id(To,ID),!, slack_ensure_im(ID,IM).
 slack_ensure_im(To,IM):- slack_ensure_im2(To,IM),!.
-slack_ensure_im(To,IM):- name_to_id(To,ID), slack_send({type:'im_open',user:ID}),!,must(slack_ensure_im2(To,IM)),!.
+% OLD slack_ensure_im(To,IM):- name_to_id(To,ID), slack_send({type:'im_open',user:ID}),!,must(slack_ensure_im2(To,IM)),!.
+slack_ensure_im(To,IM):- slack_send({type:'conversations_open',users:To}),!,must(slack_ensure_im2(To,IM)),!.
 
 
 slack_id_time(ID,TS):-flag(slack_id,OID,OID+1),ID is OID+1,get_time(Time),number_string(Time,TS).
 
 
-slack_self(Self):-slack_inform(self, id, Self).
+slack_self(Self):-get_slack_info(self, id, Self).
 
 %  {"id":2,"type":"ping","time":1484999912}
 slack_ping :- slack_id_time(ID,_),get_time(Time),TimeRnd is round(Time),slack_send({"id":ID,"type":"ping", "time":TimeRnd}).
 
 % {"id":3,"type":"message","channel":"D3U47CE4W","text":"hi there"}
-slack_chat :- slack_chat(logicmoo,"hi there").
-slack_chat2:- slack_chat(dmiles,"hi dmiles").
+slack_say :- slack_say(logicmoo,"test message to logicmoo").
+slack_say2:- slack_say(dmiles,"test message to dmiles").
+slack_say3:- slack_say(general,"test message to general channel").
 
+slack_info(Str):-
+ forall(slack_info(X,Y,Z),
+ ignore((sformat(S,'~q.',[slack_info(X,Y,Z)]),sub_string(S, _Offset0, _Length, _After, Str),
+   fmt(S)))).
 
-slack_chat(To,Msg):-  slack_ensure_im(To,IM),
-	  slack_send({
+slack_say(To,Msg):-
+  slack_ensure_im(To,IM),
+  slack_send_im(IM,'PrologMUD',Msg).
+
+slack_send_im(IM,From,Msg):-
+    slack_send({
             type: "message", 
-            username:"@prologmud_connection",
+            username:From,
 	    channel: IM,
             text: Msg
 	   }),!.
 
-slack_post(Cmd,Params):- slack_token(Token),
+slack_post(Cmd,Params,NewDict):- 
+          slack_token(Token),
 	  make_url_params(Params,URLParams),
 	  format(string(S),'https://slack.com/api/~w?token=~w&~w',[Cmd,Token,URLParams]),
 	  dmsg('~N SLACK-POST ~q ~n',[S]),!,
 	  http_open(S,Out,[]),!,
 	  json_read_dict(Out,Dict),
-	  dict_append_curls(Dict,Params,NewDict),
+	  dict_append_curls(Dict,Params,NewDict),!.
+	  
+
+slack_post(Cmd,Params):-
+  slack_post(Cmd,Params,NewDict),
 	  slack_receive(Cmd,NewDict).
 
 dict_append_curls(Dict,Params,NewDict):-any_to_curls(Params,Curly),
@@ -265,6 +309,12 @@ dict_append_curls3(Dict,{},Dict):-!.
 dict_append_curls3(Dict,{Curly},NewDict):-!,dict_append_curls3(Dict,Curly,NewDict).
 dict_append_curls3(Dict,(A,B),NewDict):-!,dict_append_curls3(Dict,A,NewDictM),dict_append_curls3(NewDictM,B,NewDict).
 dict_append_curls3(Dict,KS:V,NewDict):- string_to_atom(KS,K), put_dict(K,Dict,V,NewDict).
+
+slack_history(To,History):- slack_ensure_im(To,IM),
+ % (get_slack_info(IM, is_channel, true)-> Method = 'channels.history' ; Method = 'conversations.history'),
+  Method = 'conversations.history',
+  slack_send_receive({type:Method,channel:IM},History).
+
 
 
 string_to_dict:-
@@ -279,6 +329,8 @@ string_to_dict(String,Dict):-
 
 type_to_url("message",'chat.postMessage').
 type_to_url("im_open",'im.open').
+type_to_url("conversations_open",'conversations.open').
+type_to_url(X,X):-!.
 
 make_url_params({In},Out):-!,make_url_params(In,Out).
 make_url_params((A,B),Out):-!,make_url_params(A,AA),make_url_params(B,BB),format(atom(Out),'~w&~w',[AA,BB]).
@@ -290,15 +342,24 @@ get_kv(K:V,K,V):- must(nonvar(K);throw(get_kv(K:V,K,V))).
 get_kv(K-V,K,V).
 get_kv(K=V,K,V).
 
-slack_send(DataI):- any_to_curls(DataI,Data),slack_send00(Data).
+slack_send(DataI):- any_to_curls(DataI,Data),slack_send000(Data).
+slack_send_receive(DataI,Recv):- any_to_curls(DataI,Data),slack_send_receive000(Data,Recv).
 
-slack_send00({"type":Type,Params}):-type_to_url(Type,Cmd),!,slack_post(Cmd,Params).
+
+slack_send_receive000({"type":TypeT,Params},Recv):- text_to_string(TypeT,Type), type_to_url(Type,Cmd),!, slack_post(Cmd,Params,Recv).
 % @TODO comment the above and fix this next block
-slack_send00(Data):-slack_get_websocket(WebSocket),
-   slack_websocket(WebSocket, _WsInput, WsOutput),
-   flush_output(WsOutput),
-   slack_send(WsOutput,Data),
-   flush_output(WsOutput).
+slack_send_receive000(Data,Recv):- slack_send_ws(WebSocket,Data),!, once(ws_receive(WebSocket,Recv,[format(json)])),!.
+
+
+slack_send000({"type":TypeT,Params}):- text_to_string(TypeT,Type), type_to_url(Type,Cmd),!, slack_post(Cmd,Params).
+% @TODO comment the above and fix this next block
+slack_send000(Data):- slack_send_ws(_WebSocket,Data),!.
+
+
+
+slack_send_ws(WebSocket,Data):- slack_websocket(WebSocket, _WsInput, WsOutput), !, flush_output(WsOutput), slack_send_ws(WsOutput,Data),!.
+slack_send_ws(WsOutput,Data):- format(WsOutput,'~q',[Data]),flush_output(WsOutput),fmt(slack_sent(Data)),flush_output.
+
 
 dict_to_curly(Dict,{type:Type,Data}):- del_dict(type,Dict,Type,DictOut),dict_pairs(DictOut,_,Pairs),any_to_curls(Pairs,Data).
 dict_to_curly(Dict,{type:Type,Data}):- dict_pairs(Dict,Type,Pairs),nonvar(Type),any_to_curls(Pairs,Data).
@@ -314,12 +375,15 @@ any_to_curls(KV,AA:BB):-get_kv(KV,A,B),!,any_to_curls(A,AA),any_to_curls(B,BB).
 any_to_curls(A,AA):- catch(text_to_string(A,AA),_,fail),!.
 any_to_curls(A,A).
 
-slack_send(WsOutput,Data):- format(WsOutput,'~q',[Data]),dmsg(slack_sent(Data)).
 
+
+:- fixup_exports.
+
+end_of_file.
 
 % start slack listener in a thread
 :- if(( \+ (is_thread_running(slack_start_listener)))).
-:- thread_create(slack_start_listener,_,[alias(slack_start_listener)]).
+:- thread_create(slack_start_listener,_,[alias(slack_start_listener),detached(true)]).
 :- endif.
 
 % if the above fails .. run in debug mode
