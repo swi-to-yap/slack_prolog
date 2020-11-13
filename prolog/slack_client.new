@@ -23,86 +23,6 @@
 :- use_module(library(http/websocket)).
 
 
-:- if(exists_source(library(dicts))).
-	:- use_module(library(dicts)).
-
-:- if(exists_source(library(udt))).
-    :- use_module(library(udt)).
-:- endif.
-
-
-
-
-:- oo_class_begin(slack_client).
-
-% url	A WebSocket Message Server URL.
-:- oo_class_field(url).
-
-% self	The authenticated bot user.
-:- oo_inner_class_begin(clients).
-
-slack_client:clients:new(Ref):- throw(clients:new(Ref)).
-
-:- oo_inner_class_end(clients).
-
-
-
-% self	The authenticated bot user.
-:- oo_inner_class_begin(self).
-:- oo_inner_class_end(self).
-
-% self	The authenticated bot user.
-:- oo_inner_class_begin(self).
-:- oo_inner_class_end(self).
-
-
-% team	Details on the authenticated user's team.
-:- oo_inner_class_begin(team).
-:- oo_inner_class_end(team).
-
-% users	A hash of user objects by user ID.
-:- oo_inner_class_begin(users).
-:- oo_inner_class_end(users).
-
-
-% channels	A hash of channel objects, one for every channel visible to the authenticated user.
-:- oo_inner_class_begin(channels).
-:- oo_inner_class_end(channels).
-
-% groups	A hash of group objects, one for every group the authenticated user is in.
-:- oo_inner_class_begin(self).
-:- oo_inner_class_end(self).
-
-% ims	A hash of IM objects, one for every direct message channel visible to the authenticated user.
-:- oo_inner_class_begin(groups).
-:- oo_inner_class_end(groups).
-
-% bots	Details of the integrations set up on this team.
-:- oo_inner_class_begin(bots).
-:- oo_inner_class_end(bots).
-
-% text	textual utils.
-:- oo_inner_class_begin(text).
-:- oo_inner_class_end(text).
-
-% debug	Debugger fidling.
-:- oo_inner_class_begin(self).
-:- oo_inner_class_end(self).
-
-% events	Registered callbacks.
-:- oo_inner_class_begin(events).
-:- oo_inner_class_end(events).
-
-% files	registered storage.
-:- oo_inner_class_begin(files).
-:- oo_inner_class_end(files).
-
-:- oo_class_end(slack_client).
-
-:- endif.
-
-
-
 /* tests to see if logicmoo utils are installed.. If not, create the predicates it will use */
 :- if( \+ current_predicate( wdmsg/1 )).
 
@@ -216,7 +136,6 @@ slack_propname(Type,var):-var(Type),!.
 slack_propname(Type,K):-string(Type),!,string_to_atom(Type,K).
 slack_propname(Key-Type,NewType):-!,slack_propname(Key,Type,NewType).
 %slack_propname(Dict,NewType):- nonvar(Dict),Dict=Key.Type,nonvar(Type),!,slack_propname(Key,Type,NewType).
-%slack_propname(Key.Type,NewType):-!,slack_propname(Key,Type,NewType).
 slack_propname(Key,Key).
 
 slack_propname(Type,Key,NewType):- skip_propname(Type),!,slack_propname(Key,NewType).
@@ -224,7 +143,7 @@ slack_propname(Key,Type,NewType):- skip_propname(Type),!,slack_propname(Key,NewT
 slack_propname(_Type,Key,NewType):-slack_propname(Key,NewType).
 
 
-slack_start_listener:- is_thread_running(slack_start_listener),!,mmake.
+slack_start_listener:- is_thread_running(slack_start_listener),!.
 slack_start_listener:- thread_create(slack_listener_proc,_,[alias(slack_start_listener)]),!.
 
 slack_listener_proc:-
@@ -381,8 +300,8 @@ slack_post(Cmd,Params,NewDict):-
 
 slack_post(Cmd,Params):-
   slack_post(Cmd,Params,NewDict),
-	  slack_receive(Cmd,NewDict).
-
+  slack_receive(Cmd,NewDict).
+  
 dict_append_curls(Dict,Params,NewDict):-any_to_curls(Params,Curly),
 	dict_append_curls3(Dict,Curly,NewDict).
 
@@ -392,8 +311,7 @@ dict_append_curls3(Dict,(A,B),NewDict):-!,dict_append_curls3(Dict,A,NewDictM),di
 dict_append_curls3(Dict,KS:V,NewDict):- string_to_atom(KS,K), put_dict(K,Dict,V,NewDict).
 
 slack_history(To,History):- slack_ensure_im(To,IM),
- % (get_slack_info(IM, is_channel, true)-> Method = 'channels.history' ; Method = 'conversations.history'),
-  Method = 'conversations.history',
+  (get_slack_info(IM, is_channel, true)-> Method = 'channels.history' ; Method = 'conversations.history'),
   slack_send_receive({type:Method,channel:IM},History).
 
 
