@@ -68,9 +68,12 @@ public class PrologWebSocket {
             //((ClientEndpoint)this).setInboundMessageSizeLimit(java.lang.Integer.MAX_VALUE);
 
             userSession=container.connectToServer(this, endpointURI);
+        } catch ( Error t ) {
+            if (DEBUG>0) t.printStackTrace();
+	    throw t;
         } catch ( Throwable t ) {
             if (DEBUG>0) t.printStackTrace();
-            callback("onCreateError", t);
+           // callback("onCreateError", t);
         }
     }
 

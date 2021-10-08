@@ -15,13 +15,12 @@
 disable_gateway:- false.  % true until we fix our websocket code
 
 discord_restore_0:- 
+  stream_property(X,file_no(2)),asserta(tmp:discord_debug(X)),
   mutex_create(last_done_mutex),
-  mutex_create(connection_mutex),
-  stream_property(X,file_no(2)),asserta(tmp:discord_debug(X)).
+  mutex_create(connection_mutex).
 
-:- if( \+ prolog_load_context(reloading, true)).
-:- discord_restore_0.
-:- endif.
+:- initialization(discord_restore_0, now).
+:- initialization(discord_restore_0, restore).
 
 
 :- multifile(tmp:discord_info/3).
@@ -68,8 +67,6 @@ show_discord_info_raw(Str):-
    discord_debug_cvt(R,RD),sformat(S,'~w ~q',[RD,R]),
    matches_info(S,Str),
    ddbg_raw(R)))).
-
-
 
 
 :- if( \+ prolog_load_context(reloading, true)).
@@ -138,31 +135,17 @@ is_thread_running(ID):-
 % 1st - Checks for a local declaration 
 %  (if the next line is uncommented and replaced by a real token )
 % tmp:discord_token('xoxb-01234567890-xxxxxxxxxxxxxxxx').
-
-
+find_token:- tmp:discord_token(_),!.
 % 2nd - Checks for a local file called ".discord_auth.pl" for tmp:discord_token/1 as above
-:- if(( \+ tmp:discord_token(_) , exists_file('.discord_auth.pl'))).
-:- include('.discord_auth.pl').
-:- endif. 
- 
+find_token:- \+ tmp:discord_token(_), exists_file('.discord_auth.pl'), consult('.discord_auth.pl'), !.
 % 3rd - Checks env for DISCORD_API_TOKEN
 %  ( defined by# export DISCORD_API_TOKEN=xoxb-01234567890-xxxxxxxxxxxxxxxx )
-:- if(( \+ tmp:discord_token(_))).
-:- getenv('DISCORD_API_TOKEN',Was)->asserta(tmp:discord_token(Was));true.
-:- endif.
-
+find_token:-  \+ tmp:discord_token(_), getenv('DISCORD_API_TOKEN',Was), asserta(tmp:discord_token(Was)), !.
 % 4th - Checks users config directory for file called ".discord_auth.pl"  tmp:discord_token/1 as above
-:- if(( \+ tmp:discord_token(_) , exists_file('~/.discord_auth.pl'))).
-:- include('~/.discord_auth.pl').
-:- endif.
+find_token:- \+ tmp:discord_token(_), expand_file_name('~/.discord_auth.pl',[X]), exists_file(X), consult(X), !.
+find_token:- throw(missing(tmp:discord_token(_))).
 
-:- if(( \+ tmp:discord_token(_) , exists_file('./.discord_auth.pl'))).
-:- include('./.discord_auth.pl').
-:- endif.
-
-:- if(( \+ tmp:discord_token(_))).
-:- throw(missing(tmp:discord_token(_))).
-:- endif.
+:- find_token.
 
 :- dynamic(tmp:discord_websocket_event/2).
 :- dynamic(tmp:discord_chat_event/2).
@@ -402,6 +385,8 @@ discord_http_0(Cmd,Opts):-
   discord_http(Prop,Cmd,Opts))).
 discord_http(Prop,Cmd,Opts):- select(json(JSON),Opts,OptsWo), \+ is_dict(JSON), \+ atomic(JSON),
   any_to_json_dict(JSON,Dict),!,discord_http(Prop,Cmd,[json(Dict)|OptsWo]). 
+discord_http(Prop,Cmd,Opts):- select(post(json(JSON)),Opts,OptsWo), \+ is_dict(JSON), \+ atomic(JSON),
+  any_to_json_dict(JSON,Dict),!,discord_http(Prop,Cmd,[post(json(Dict))|OptsWo]). 
 
 discord_http(Prop,Cmd,Opts):- member(method(_),Opts), \+ member(post(_),Opts),!,discord_http(Prop,Cmd,[post([])|Opts]).
 discord_http(Prop,Cmd,Opts):-
@@ -485,9 +470,12 @@ string_to_dict(Text,Dict):- atom_json_dict(Text,Dict,[value_string_as(string),nu
 
 discord_join_subchannel(ID):- discord_http(channels/ID/'thread-members'/'@me',[method(put)]).
 
-system:discord_websocket_hook(onOpen,_):- discord_client:ping_discord.
-system:discord_websocket_hook(X,_):- discord_client:discord_recon(X),!,discord_client:discord_reconnect.
-system:discord_websocket_hook(Event,Message):- assertz(tmp:discord_websocket_event(Event,Message)).
+system:discord_websocket_hook(Type,Message):- discord_client:discord_websocket_client_hook(Type,Message).
+
+discord_websocket_client_hook(onOpen,_):- ping_discord.
+discord_websocket_client_hook(Event,Message):- discord_reconn_after(Event),!, 
+  writeln(user_error,discord_event(Event,Message)), discord_reconnect.
+discord_websocket_client_hook(Event,Message):- assertz(tmp:discord_websocket_event(Event,Message)).
 
 discord_gateway_proc:- tmp:jpl_websocket(_),!.
 discord_gateway_proc:- discord_connect,!.
@@ -516,10 +504,10 @@ discord_websocket_hook_1(onMessage,Message):- string_to_dict(Message,Dict),!,dis
 %discord_websocket_hook_1(Type,Message):-notrace_catch(atom_to_term(Message,Dict,_)),!,discord_event(Type,Dict).
 discord_websocket_hook_1(Type,Message):- writeln(user_error,discord_event(Type,Message)),discord_event(Type,Message),!.
 
-discord_recon(onCreateError).
-discord_recon(sendTextError).
-discord_recon(onClose).
-discord_recon(sendTextError).
+discord_reconn_after(onCreateError).
+discord_reconn_after(sendTextError).
+discord_reconn_after(onClose).
+discord_reconn_after(sendTextError).
 
 
 
@@ -565,7 +553,9 @@ discord_disconnect_0:- retractall(tmp:jpl_websocket(_)).
 
 % This may be triggered by several events at once (so it has to hapen at least 10 seconds appart
 discord_reconnect_0:- tmp:last_disconnect(Before), get_time(Time), Before+10 <  Time,!.
-discord_reconnect_0:- discord_disconnect_0, discord_connect_0.
+discord_reconnect_0:- discord_disconnect_0, fail.
+discord_reconnect_0:- discord_connect_0, fail.
+discord_reconnect_0.
 
 discord_connect_0:- tmp:jpl_websocket(_),!.
 discord_connect_0:- %setenv('CLASSPATH','/opt/logicmoo_workspace/packs_sys/swicli/build/application/classes:/opt/logicmoo_workspace/packs_sys/swicli/lib/javax.websocket-api-1.0.jar'),
@@ -585,8 +575,45 @@ discord_identify:-
     }, 
   "intents": 65535
   }
-}).
+}),
+ nop(discord_add_slash).
 
+discord_add_slash:- 
+ discord_http(applications/772113231757574185/command,
+ [post(
+ json({
+    "name": "blep",
+    "type": 1,
+    "description": "Send a random adorable animal photo",
+    "options": [
+        {
+            "name": "animal",
+            "description": "The type of animal",
+            "type": 3,
+            "required": true,
+            "choices": [
+                {
+                    "name": "Dog",
+                    "value": "animal_dog"
+                },
+                {
+                    "name": "Cat",
+                    "value": "animal_cat"
+                },
+                {
+                    "name": "Penguin",
+                    "value": "animal_penguin"
+                }
+            ]
+        },
+        {
+            "name": "only_smol",
+            "description": "Whether to show only baby animals",
+            "type": 5,
+            "required": false
+        }
+    ]
+}))]).
 discord_resume:- 
  discord_send( {
   "op": 6,
@@ -1179,6 +1206,7 @@ discord_restore_1:-
 :- if( \+ prolog_load_context(reloading, true)).
 :- discord_restore_1.
 :- endif.
+:- initialization(discord_restore_1,program).
 
 discord_say :- discord_say('prologmud_bot_testing',"test message to prologmud_bot_testing").
 discord_say0:- 
@@ -1215,21 +1243,21 @@ discord_say2a(X):- sformat(S,"test message to ~q.",[X]), discord_say(X,S).
 
 
 discord_restore_2:- discord_connect.
+:- initialization(discord_restore_2).
 
 :- if( \+ prolog_load_context(reloading, true)).
-:- discord_restore_2.
 :- prolog_load_context(file,File), forall((source_file(PP,File),strip_module(PP,M,P),functor(P,F,0)),add_history(M:F)).
 :- endif.
 
 
 % start discord gateway in a thread
-:- discord_start_gateway.
+:- initialization(discord_start_gateway).
 % start discord pinger in a thread
 % :- deque_discord_events.
 % start discord pinger in a thread
 %:- ping_discord.
 % start discord message checker in a thread 
-:- discord_proc_tasks.
+:- initialization(discord_proc_tasks).
 /*
 :- discord_message_checking_01.
 :- discord_message_checking_02.
