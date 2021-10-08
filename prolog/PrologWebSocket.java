@@ -146,10 +146,10 @@ public class PrologWebSocket {
                 if (m==null) m = new Atom(""+message);
                 new Query(messageHandler, new Term[]{new Atom(type), m}).oneSolution();
             } catch ( Throwable t ) {
-                if (DEBUG>1) t.printStackTrace();
-                callback("onCallbackError", t);
+                t.printStackTrace();
             }
-        } else if (DEBUG>1) {
+        } 
+	if (DEBUG>1) {
             if (ps==null) ps = System.err;
             if (ps==null) ps = System.out;
             if (ps!=null) {
