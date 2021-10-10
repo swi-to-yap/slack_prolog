@@ -19,8 +19,12 @@ check_seen(MID):- add_seen(MID).
 
 rtrv_message(MID):- discord_ddd(MID,content,_),!.
 % rtrv_message(MID):- discord_ddd(MID,seen,true),!.
-rtrv_message(MID):- m_to_c(MID,CID),!,ignore(discord_http(channels/CID/messages/MID)),!.
+rtrv_message(MID):- m_to_c(MID,CID),!,rtrv_message(MID,CID).
 rtrv_message(_):- !.
+
+rtrv_message(MID,_):- discord_ddd(MID,content,_),!.
+rtrv_message(_,_):- \+ ima_bot,!.
+rtrv_message(MessageID,ChannelID):- ignore(notrace_catch(discord_http(channels/ChannelID/messages/MessageID))).
 
 add_seen(ID):- discord_ddd(ID, seen, true),!.
 add_seen(ID):- discord_addd(ID, seen, true), fail.
@@ -31,7 +35,8 @@ rtrv_new_messages :-
  forall(
  (discord_ddd(ChannelID,last_message_id,MessageID),
   \+ discord_ddd(MessageID,content,_)),
-  (sleep(0.2),ignore(discord_http(channels/ChannelID/messages/MessageID)))).
+  (sleep(0.2),rtrv_message(MessageID,ChannelID))).
+
 
 % https://discord.com/oauth2/authorize?response_type=code&client_id=157730590492196864&scope=identify+guilds.join&state=15773059ghq9183habn&redirect_uri=https%3A%2F%2Fgoogle.com&prompt=consent
 rtrv_messages_chan:- \+ thread_self(discord_message_checking_01), forall(any_to_chan_id(_Channel,ID),  rtrv_messages_chan(ID)).

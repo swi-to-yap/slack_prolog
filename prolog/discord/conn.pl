@@ -161,17 +161,16 @@ discord_send(DataI):- any_to_curls(DataI,Data),discord_send000(Data).
 % @TODO comment the above and fix this next block
 discord_send000(Data):-  discord_send_ws(_WebSocket,Data),!.
 
+% Java version (Until JanW fixes SWI-Prolog's builtin impl
+discord_send_ws(WebSocket,Data):- tmp:jpl_websocket(WebSocket),!,
+  with_output_to(atom(S),writeq(Data)), jpl_call(WebSocket,send_message,[S],_),!. 
 
-discord_send_ws(WebSocket,Data):- 
-  with_output_to(atom(S),writeq(Data)), tmp:jpl_websocket(WebSocket),!,jpl_call(WebSocket,send_message,[S],_),!. 
-discord_send_ws(WebSocket,Data):- 
-  tmp:discord_websocket(WebSocket, _WsInput, WsOutput), !,  
+discord_send_ws(WebSocket,Data):- tmp:discord_websocket(WebSocket, _WsInput, WsOutput), !,  
  must_det_l((flush_output(WsOutput),
   wdmsg(ws_send(WsOutput,text(Data))),
   ws_send(WsOutput,text(Data)),!,flush_output(WsOutput))),!.
 
-discord_send_ws(WebSocket,Data):- 
-  tmp:discord_websocket(WebSocket, _WsInput, WsOutput), !,  
+discord_send_ws(WebSocket,Data):- tmp:discord_websocket(WebSocket, _WsInput, WsOutput), !,  
  must_det_l((flush_output(WsOutput), any_to_json_dict(Data,Dict),
   wdmsg(ws_send(WsOutput,json(Dict))),
   ws_send(WsOutput,json(Dict)),!,flush_output(WsOutput))),!.

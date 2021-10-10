@@ -10,9 +10,6 @@ is_thread_running(ID):-
   is_thread(ID), thread_property(ID,status(What)),!,
    (What==running->true;(thread_join(ID,_ ),!,fail)).
 
-check_4_tasks:- forall(how_often(Often,Task),ignore(check_since(Often,Task))),fail.
-check_4_tasks.
-
 :- volatile(tmp:doing_task/1).
 :- dynamic(tmp:doing_task/1).
 :- volatile(tmp:last_done/2).
@@ -40,11 +37,11 @@ remember_task(Task):- with_mutex(last_done_mutex,
 %how_often(200, guilds).
 %how_often(30, channels).
 
-how_often(5, handle_discord_websocket_events).
+%how_often(5, handle_discord_websocket_events).
 %how_often(41, send_ping).
-%how_often(2, handle_chat_events).
+how_often(2, handle_chat_events).
 how_often(once, discord_update(channels)).
-%how_often(300, rtrv_new_messages).
+how_often(300, rtrv_new_messages).
 /*
 how_often(500, rtrv_dm_handles).
 */
@@ -69,8 +66,10 @@ ping_sleep:- discord_ddd(heartbeat_interval,hasValue,Time)->sleep(Time);sleep(30
 %deque_discord_events:- disable_gateway,!.
 deque_discord_events:- ensure_thread_model(deque_discord_events,sleep(1),do_task(handle_discord_websocket_events)).
 
-
 discord_proc_tasks:- ensure_thread_model(discord_proc_tasks, sleep(1), check_4_tasks).
+
+check_4_tasks:- forall(how_often(Often,Task),ignore(check_since(Often,Task))),fail.
+check_4_tasks.
 
 discord_message_checking_01:- disable_gateway,!.
 discord_message_checking_01:-  

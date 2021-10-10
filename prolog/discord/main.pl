@@ -109,7 +109,7 @@ discord_restore_2:- discord_connect.
 % start discord gateway in a thread
 :- initialization(discord_start_gateway).
 % dequee discord events in a thread
-% :- deque_discord_events.
+:- deque_discord_events.
 % start discord pinger in a thread
 %:- ping_discord.
 % start discord message checker in a thread 
