@@ -10,36 +10,34 @@ discord_grouping(presences).
 discord_grouping(guilds).
 
 
-
 % ===============================================
 % How this module might find your token:
 % ===============================================
-
-% 1st - Checks for a local declaration 
-%  (if the next line is uncommented and replaced by a real token )
+% 0th - if the next line is uncommented and replaced by a real token 
 % tmp:discord_token('xoxb-01234567890-xxxxxxxxxxxxxxxx').
+% 1st - Checks for a local declaration 
 find_token:- tmp:discord_token(_),!.
 % 2nd - Checks for a local file called ".discord_auth.pl" for tmp:discord_token/1 as above
-find_token:- \+ tmp:discord_token(_), exists_file('.discord_auth.pl'), consult('.discord_auth.pl'), !.
-% 3rd - Checks env for DISCORD_API_TOKEN
-%  ( defined by# export DISCORD_API_TOKEN=xoxb-01234567890-xxxxxxxxxxxxxxxx )
-find_token:-  \+ tmp:discord_token(_), getenv('DISCORD_API_TOKEN',Was), asserta(tmp:discord_token(Was)), !.
+find_token:- exists_file('.discord_auth.pl'), consult('.discord_auth.pl'), !.
+% 3rd - Checks env for DISCORD_API_TOKEN %  ( defined by# export DISCORD_API_TOKEN=xoxb-01234567890-xxxxxxxxxxxxxxxx )
+find_token:- getenv('DISCORD_API_TOKEN',Was), asserta(tmp:discord_token(Was)), !.
 % 4th - Checks users config directory for file called ".discord_auth.pl"  tmp:discord_token/1 as above
-find_token:- \+ tmp:discord_token(_), expand_file_name('~/.discord_auth.pl',[X]), exists_file(X), consult(X), !.
+find_token:- expand_file_name('~/.discord_auth.pl',[X]), exists_file(X), consult(X), !.
 find_token:- throw(missing(tmp:discord_token(_))).
 
 :- find_token.
 
 
-
 discord_update(me):-  discord_http(users/'@me').
 discord_update(guilds):- discord_update(me), discord_http(users/'@me'/guilds).
 discord_update(channels):- discord_update(guilds),
-   %discord_http(guilds/{guilds-id}),
-   discord_http(guilds/{guilds-id}/channels),
+ forall(discord_ddd(GuildID,instanceOf,guilds),
+  (discord_http(guilds/GuildID),
+   discord_http(guilds/GuildID/channels),
    %discord_http(guilds/{guilds-id}/members),
    %discord_http(guilds/{guilds-id}/roles),
-   !.
+   true
+   )).
 
 
 /*
@@ -55,7 +53,7 @@ discord_send({
 }).
 */
 
-
+% Poll for any existing DMs
 rtrv_dm_handles:-  forall(discord_ddd(UserID,instanceOf,members), rtrv_dm_handle(UserID)).
 
 rtrv_dm_handle(UserID):-
@@ -63,10 +61,12 @@ rtrv_dm_handle(UserID):-
  notrace(( 
    ignore((
     \+ discord_ddd(UserID,bot,true),
+    % check that we are missing the info
     \+ (discord_ddd(ID,recipient,UserID),
-     discord_ddd(ID,recipient_name,_Name),
-     discord_ddd(ID,type,1),
-     discord_ddd(ID,instanceOf,channels)),
+        discord_ddd(ID,recipient_name,_Name),
+        discord_ddd(ID,type,1),
+        discord_ddd(ID,instanceOf,channels)),
+ % actually retrieve it
  rtrv_dm_handle_now(UserID))))).
 
 rtrv_dm_handle_now(UserID):- integer(UserID), !, 
@@ -79,11 +79,12 @@ rtrv_dm_handle_now(Name):- from_string(Name,ID),integer(ID),!,rtrv_dm_handle_now
 
 discord_me(Self):-discord_dd('@me', id, Self).
 
-
 get_emojis:- discord_http(guilds/{guilds-id}/emojis).
 
+default_guild(GuildID):- discord_ddd(GuildID,instanceOf,guilds).
 default_guild(748871194572226661).
 default_guild("GUILD_CREATE").
+
 
 %:- autoload_all.
 discord_restore_1:-
@@ -107,7 +108,7 @@ discord_restore_2:- discord_connect.
 
 % start discord gateway in a thread
 :- initialization(discord_start_gateway).
-% start discord pinger in a thread
+% dequee discord events in a thread
 % :- deque_discord_events.
 % start discord pinger in a thread
 %:- ping_discord.
