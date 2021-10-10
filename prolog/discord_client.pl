@@ -4,75 +4,33 @@
         discord_send/1,
         ping_discord/0,
         discord_get_websocket/1,
-        is_thread_running/1,
-        discord_ensure_im/2,
+        is_thread_running/1,        
+        discord_restore_0/0,
         any_to_id/2]).
 
 /** <module> discord_client - Provides a websocket API to write discord clients
 
 */
+:- meta_predicate(notrace_catch(:)).
+notrace_catch(G):- notrace(catch(G,_,fail)).
+debug_console(G):- (tmp:discord_debug(X);X=user_error),!, with_output_to(X,G).
+
+:- volatile(tmp:discord_debug/1).
+:-  dynamic(tmp:discord_debug/1).
+if_debug(_).
+
+:- meta_predicate(disco_call(:)).
+disco_call(G):- wots(S,G),discord_say(S).
 
 disable_gateway:- false.  % true until we fix our websocket code
 
+discord_restore_0:- tmp:discord_debug(_),!.
 discord_restore_0:- 
   stream_property(X,file_no(2)),asserta(tmp:discord_debug(X)),
-  mutex_create(last_done_mutex),
-  mutex_create(connection_mutex).
+  notrace_catch(mutex_create(last_done_mutex)),
+  notrace_catch(mutex_create(connection_mutex)).
 
-:- initialization(discord_restore_0, now).
-:- initialization(discord_restore_0, restore).
-
-
-:- multifile(tmp:discord_info/3).
-:- volatile(tmp:discord_info/3).
-:- dynamic(tmp:discord_info/3).
-reload_discord_info:- reconsult(guild_info_file).
-%load_discord_info:- !.
-load_discord_info:- exists_file(guild_info_file)->consult(guild_info_file);true.
-clear_discord_info:- retractall(tmp:discord_info/3).
-save_discord_info:- 
- setup_call_cleanup(open(guild_info_file,write,O),
-  save_discord_info(O),
-  close(O)).
-
-tmp_r(R,TmpR,TmpRG):- functor(R,discord_info,3), TmpR=tmp:R, TmpRG = (TmpR, \+ discord_is_secret(R)).
-
-save_discord_info(O):-
-  tmp_r(R,TmpR,TmpRG),
-  functor(R,F,A), Dyn = tmp:F/A, 
-  format(O,'~n~q.~n~q.~n~q.~n',
-   [(:- multifile(Dyn)),
-    (:- volatile(Dyn)),
-    (:- dynamic(Dyn))]),      
-  forall(TmpRG,format(O,'~q.~n',[TmpR])).
-
-show_discord_info:-
-  tmp_r(R,_TmpR,TmpRG),
-  forall(TmpRG,ddbg_always(R)).
-show_discord_info_raw:-
-  tmp_r(R,_TmpR,TmpRG),
-  forall(TmpRG,ddbg_raw(R)).
-show_discord_info(Str):-
- tmp_r(R,_TmpR,TmpRG),
- forall(TmpRG,
- ignore((
-   discord_debug_cvt(R,RD),sformat(S,'~w ~q',[RD,R]),
-   matches_info(S,Str),
-   ddbg_always(RD)))).
-
-show_discord_info_raw(Str):-
- tmp_r(R,_TmpR,TmpRG),
- forall(TmpRG,
- ignore((
-   discord_debug_cvt(R,RD),sformat(S,'~w ~q',[RD,R]),
-   matches_info(S,Str),
-   ddbg_raw(R)))).
-
-
-:- if( \+ prolog_load_context(reloading, true)).
-:- at_halt(save_discord_info).
-:- load_discord_info.
-:- endif.
+:- initialization(discord_restore_0).
 
 discord_grouping(messages).
 discord_grouping(channels).
@@ -95,31 +53,7 @@ discord_grouping(guilds).
 
 :- use_module(library(logicmoo_utils)).
 
-:- meta_predicate(notrace_catch(:)).
-notrace_catch(G):- notrace(catch(G,_,fail)).
-debug_console(G):- (tmp:discord_debug(X);X=user_error), with_output_to(X,G).
 
-if_debug(_).
-
-
-:- thread_local(t_l:hide_ddbg/0).
-
-:- meta_predicate(without_ddbg(:)).
-without_ddbg(G):- locally(t_l:hide_ddbg,call(G)).
-
-
-%ddbg(O):- sub_var("PRESENCE_UPDATE",O),!.
-%ddbg(_):- \+ thread_self(main),!.
-ddbg(_):- t_l:hide_ddbg,!.
-ddbg(discord_addd(s,hasValue,_)).
-ddbg(O):- ddbg_always(O).
-%ddbg_always(O):- discord_debug_cvt(O,OO), !, debug_console(in_cmt(fmt(OO))).
-ddbg_always(O):- discord_debug_cvt(O,OO),!, ddbg_raw(OO).
-ddbg_raw(OO):-
- locally(current_prolog_flag(debugger_write_options,[quoted(true), portray(true), 
-   max_depth(500), attributes(portray), spacing(next_argument)]),
-   debug_console(in_cmt(print_tree(OO)))).
-%ddbg_always(F,Args):- if_debug((fresh_line, format(user_error,F,Args))).
 
 is_thread_running(ID):-
   is_thread(ID), thread_property(ID,status(What)),!,
@@ -147,17 +81,9 @@ find_token:- throw(missing(tmp:discord_token(_))).
 
 :- find_token.
 
-:- dynamic(tmp:discord_websocket_event/2).
-:- dynamic(tmp:discord_chat_event/2).
-:- dynamic(tmp:last_disconnect/1).
 % ===============================================
 % Utility functions
 % ===============================================
-
-discord_token_string(S):-tmp:discord_token(T),atom_string(T,S).
-
-%curl -H "Authorization: Bot $AUTH_TOK" -H "User-Agent: DiscordBot" -H "Content-Type: application/json" 
-%  https://discord.com/api/v9/
 
 discord_update(me):-  discord_http(users/'@me').
 discord_update(guilds):- discord_update(me), discord_http(users/'@me'/guilds).
@@ -220,8 +146,8 @@ check_seen(MID):- discord_ddd(MID, timestamp, When), get_time(Now), When + ( 864
 check_seen(MID):- \+ discord_ddd(MID,content,_), rtrv_message(MID),fail.
 check_seen(MID):- add_seen(MID).
 
-rtrv_message(MID):- discord_ddd(MID, seen, true),!.
 rtrv_message(MID):- discord_ddd(MID,content,_),!.
+% rtrv_message(MID):- discord_ddd(MID,seen,true),!.
 rtrv_message(MID):- m_to_c(MID,CID),!,ignore(discord_http(channels/CID/messages/MID)),!.
 rtrv_message(_):- !.
 
@@ -258,6 +184,11 @@ do_task(Task):-
      setup_call_cleanup(
          remember_task(Task), ignore(call(Task)), remember_task(Task)),erase(R)).
 
+how_long_ago(Task,Ago):- nonvar(Ago),!,how_long_ago(Task,TryAgo),!,Ago=TryAgo.
+how_long_ago(Task,Ago):- 
+  with_mutex(last_done_mutex,tmp:last_done(Task,Time);Ago=never),!,
+  ignore((number(Time),get_time(Now),Ago is Now - Time)),!.
+
 remember_task(Task):- with_mutex(last_done_mutex, 
   ignore((retractall(tmp:last_done(Task,_)),get_time(Time),asserta(tmp:last_done(Task,Time))))).
 
@@ -267,9 +198,9 @@ remember_task(Task):- with_mutex(last_done_mutex,
 how_often(5, handle_discord_websocket_events).
 %how_often(41, send_ping).
 %how_often(2, handle_chat_events).
-/*
 how_often(once, discord_update(channels)).
-how_often(300, rtrv_new_messages).
+%how_often(300, rtrv_new_messages).
+/*
 how_often(500, rtrv_dm_handles).
 */
 %how_often(600, show_discord_tasks).
@@ -291,6 +222,11 @@ handle_chat_event:-
   (retract(tmp:discord_chat_event(Type,Message))*->ignore(handle_discord_chat_event(Type,Message));true).
 
 
+dont_reply_user("PrologMUD").
+dont_reply_user("irc0").
+dont_reply_user("LM489").
+dont_reply_user("jllykifsh").
+
 add_discord_chat_event(ID,Message):- assertz(tmp:discord_chat_event(ID,Message)).
 
 handle_discord_chat_event(ID,_Message):- discord_ddd(_,referenced_message,ID),!.
@@ -300,41 +236,30 @@ handle_discord_chat_event(ID,content(Message)):-
   handle_discord_chat_event(ID,say(User,Message)).
 
 handle_discord_chat_event(ID,Message):- remember_task(handle_chat_events), dmsg(chat_event(ID,Message)),fail.
-handle_discord_chat_event(_ID,say(User,_Message)):- User=="PrologMUD",!.
+handle_discord_chat_event(ID, _):- \+ number(ID),!.
+handle_discord_chat_event(_ID,say(User,_Message)):- dont_reply_user(User),!.
 handle_discord_chat_event(ID,say(User,Message)):- !,
-  term_to_atom(ID,DEST), atom_string(DEST,DESTS), trim_message(Message,Str), 
-  without_ddbg(external_chat_event(discord_client:discord_chat_override,DESTS,User,say(Str))),!.
+ trim_message(Message,Str), 
+ discord_set_typing(ID),
+ locally(t_l:discord_channel(ID),
+  without_ddbg(external_chat_event(discord_client:discord_chat_override,ID,User,say(Str)))),!,
+  flush_channel_output_buffer(ID).
 handle_discord_chat_event(ID,Message):- dmsg(failed_chat_event(ID,Message)).
 
-trim_message(A,C):-  split_string(A, "", "`\s\t\n", [B]), A\==B,!,trim_message(B,C).
+trim_message(A,C):- \+ string(A),!,any_to_string(A,S),trim_message(S,C).
+trim_message(A,C):- split_string(A, "", "`\s\t\n", [B]), A\==B,!,trim_message(B,C).
 trim_message(A,A).
 
-  %discord_ddd(ID,channel_id,Channel),!,
+discord_set_typing(ID):- any_to_chan_id(ID,CID),ID\==CID,!,discord_set_typing(CID).
+discord_set_typing(ID):- how_long_ago(discord_set_typing(ID),Ago),number(Ago), Ago < 5,!. % only sending typing idicator every 5 seconds
+discord_set_typing(ID):- 
+  remember_task(discord_set_typing(ID)),
+  discord_http(channels/ID/typing,[method(post)]).
 
 
-:- use_module(library(eggdrop)).
-
-
-discord_write_done(det('Yes',_)):-!. 
-discord_write_done(Data):- write(' '),write(Data).
-
-discord_show_each_result(_CMD,Done,_,[]):- !, format(' '), Done==true, write("% Yes.").
-
-discord_show_each_result(_CMD,Done,N,Vs):- 
-  once(once((Done==true -> (once(\+ \+ write_varvalues2(Vs))) ; (once(\+ \+ write_varvalues2(Vs)),N>200)))).
-
-discord_chat_say(DEST,Msg):-
- text_to_string(DEST,Channel),
- text_to_string(Msg,Str),
-  discord_say(Channel,Str),!.
-
-%discord_chat_override(Goal):- dmsg(discord_chat_override(Goal)),fail.
-discord_chat_override(put_msg(DEST,Msg)):- !, discord_chat_say(DEST,Msg).
-discord_chat_override(put_notice(DEST,Msg)):- !, discord_chat_say(DEST,Msg).
-discord_chat_override(Goal):- functor(Goal,F,A),atom_concat('discord_',F,DF), discord_client:current_predicate(DF/A), !,
-  Goal=..[F|Args],DGoal=..[DF|Args],!,call(DGoal).
-discord_chat_override(Goal):- dmsg(skipped_chat_override(Goal)).
-%discord_chat_override(Goal):- discord_client:call(Goal). % in-case there are new ones
+% ====================================
+% Discord Task Calls
+% ====================================
 
 %how_often(300, rtrv_messages_chan).
 %how_often(10, discord_message_checking_01).
@@ -361,100 +286,6 @@ rtrv_messages_chan:- \+ thread_self(discord_message_checking_01), forall(any_to_
 rtrv_messages_chan(ID):- discord_ddd(ID,last_message_id,MessageID),discord_ddd(MessageID,content,_),!.
 rtrv_messages_chan(ID):- discord_http(channels/ID/'messages?limit=20'),sleep(1).
 
-% should return wss://gateway.discord.gg
-%discord_get_websocket_url('wss://127.0.0.1:50051/'):-!.
-discord_get_websocket_url('wss://gateway.discord.gg/?v=9&encoding=json'):-!.
-discord_get_websocket_url(URL):- discord_http(gateway), get_discord(url,URL).
-
-into_discord_url_object(UCmd,Prop):- atomic_list_concat([Prop2,_|_],'?',UCmd),!,into_discord_url_object(Prop2,Prop).
-into_discord_url_object(UCmd,Prop):- atomic_list_concat([_,I|ST],'/',UCmd),member_rev(Prop2,[I|ST]), \+ atom_number(Prop2,_),!,into_discord_url_object(Prop2,Prop).
-into_discord_url_object(Prop,Prop).
-
-member_rev(X,[_|L]):-  member_rev(X,L).
-member_rev(X,[X|_]).
-
-check_pausing:- ignore((retract(tmp : discord_info(_,retry_after,Sleep)),sleep(Sleep),sleep(0.3))).
-
-discord_http(Cmd):- discord_http(Cmd,[]),!.
-
-discord_http(Cmd,Opts):- notrace(discord_http_0(Cmd,Opts)).
-discord_http_0(Cmd,Opts):-
- must_det_l((
-  expand_discoure_host_post(Cmd,UCmd),
-  into_discord_url_object(UCmd,Prop),
-  discord_http(Prop,Cmd,Opts))).
-discord_http(Prop,Cmd,Opts):- select(json(JSON),Opts,OptsWo), \+ is_dict(JSON), \+ atomic(JSON),
-  any_to_json_dict(JSON,Dict),!,discord_http(Prop,Cmd,[json(Dict)|OptsWo]). 
-discord_http(Prop,Cmd,Opts):- select(post(json(JSON)),Opts,OptsWo), \+ is_dict(JSON), \+ atomic(JSON),
-  any_to_json_dict(JSON,Dict),!,discord_http(Prop,Cmd,[post(json(Dict))|OptsWo]). 
-
-discord_http(Prop,Cmd,Opts):- member(method(_),Opts), \+ member(post(_),Opts),!,discord_http(Prop,Cmd,[post([])|Opts]).
-discord_http(Prop,Cmd,Opts):-
- must_det_l((  
-  expand_discoure_host_post(Cmd,UCmd),
-  bot_discord_token(TokenHeader),
-  sformat(URL,'https://discord.com/api/v9/~w',[UCmd]))),
-  %wdmsg(URL=Opts),
-  check_pausing,
-  http_open(URL, In, [status_code(Status), 
-          request_header('Authorization'=TokenHeader), 
-          request_header('User-Agent'='DiscordBot'),
-          request_header('Content-Type'='application/json')|Opts]),
-  ignore((\+ ok_satus_code(Status),dmsg((URL:Opts=Status)))),
-  must_det_l((
-    read_stream_to_codes(In,Codes),notrace_catch(close(In)),text_to_string(Codes,Str),
-    read_codes_response(Status,Str,Term),discord_receive(Prop,Term))),
-  !, nop(ok_satus_code(Status)).
-
-ok_satus_code(Code):- var(Code),!,fail.
-ok_satus_code(200).
-ok_satus_code(204).
-
-read_codes_response(_Status,String,Term):- String\=="",string_to_dict(String,Term),!.
-read_codes_response(Status,Term,reply(Status,Term)).
-
-
-
-expand_discoure_host_post(A,O):- \+ compound(A),!,A=O.
-expand_discoure_host_post('$'(A),O):- !, get_discord(A,M),expand_discoure_host_post(M,O),!.
-expand_discoure_host_post(A / B,O):- !, expand_discoure_host_post(A,AA),expand_discoure_host_post(B,BB),!,sformat(O,"~w/~w",[AA,BB]).
-expand_discoure_host_post({A - B},O):- !, get_discord(A,B,M),expand_discoure_host_post(M,O).
-expand_discoure_host_post(A,O):- A=O.
-
-:- dynamic(tmp:discord_websocket/3).
-
-% use dmiles proxy impl first?
-discord_get_websocket(WS):- tmp:jpl_websocket(WS),!.
-discord_get_websocket(WS):- tmp:discord_websocket(WS,_,_),!.
-discord_get_websocket(WS):-
-   discord_get_websocket_url(URL),!,
-   discord_open_websocket(URL,WS),!.
-
-:- dynamic(tmp:jpl_websocket/1).
-
-discord_open_websocket(URL,WS):-
-   ignore(tmp:discord_websocket(OLD_WS,_,_)),
-   %atom_concat(URL,'?v=9&encoding=json',UrlV9),
-   http_open_websocket(URL, WS, []),
-   stream_pair(WS,I,O),
-   show_call(asserta(tmp:discord_websocket(WS,I,O))),
-   (nonvar(OLD_WS)->discord_remove_websocket(OLD_WS);true).
-   
-
-discord_remove_websocket(OLD_WS):-
-   ignore(retract(tmp:discord_websocket(OLD_WS,_,_))),
-   ignore(catch(my_ws_close(OLD_WS,1000,''),_,true)).
-
-% ===============================================
-% Property Names
-% ===============================================
-
-discord_start_gateway:- disable_gateway,!.
-discord_start_gateway:- tmp:jpl_websocket(_),!.
-discord_start_gateway:- is_thread_running(discord_start_gateway),!.
-%discord_start_gateway:- discord_gateway_proc,!.
-discord_start_gateway:- \+ thread_self(discord_start_gateway), 
-  !,thread_create(discord_gateway_proc,_,[alias(discord_start_gateway)]),!.
 
 string_to_dict:-
  string_to_dict("{\"type\":\"dnd_updated_user\",\"user\":\"U3T3R279S\",\"dnd_status\":{\"dnd_enabled\":false,\"next_dnd_start_ts\":1,\"next_dnd_end_ts\":1},\"event_ts\":\"1485012634.280271\"}",Dict),
@@ -470,159 +301,6 @@ string_to_dict(Text,Dict):- atom_json_dict(Text,Dict,[value_string_as(string),nu
 
 discord_join_subchannel(ID):- discord_http(channels/ID/'thread-members'/'@me',[method(put)]).
 
-system:discord_websocket_hook(Type,Message):- discord_client:discord_websocket_client_hook(Type,Message).
-
-discord_websocket_client_hook(onOpen,_):- ping_discord.
-discord_websocket_client_hook(Event,Message):- discord_reconn_after(Event),!, 
-  writeln(user_error,discord_event(Event,Message)), discord_reconnect.
-discord_websocket_client_hook(Event,Message):- assertz(tmp:discord_websocket_event(Event,Message)).
-
-discord_gateway_proc:- tmp:jpl_websocket(_),!.
-discord_gateway_proc:- discord_connect,!.
-discord_gateway_proc:-
- call_cleanup((  
-  repeat,
-  once(discord_get_websocket(WS)),
-  once(my_ws_receive(WS,Data,[format(json)])),
-  (Data==
-    end_of_file->!;
-  (once(discord_receive(gateway,Data)),flush_output,fail))),
-  discord_remove_websocket(WS)).
-
-my_ws_close(Ws,Data,Options):- ws_close(Ws,Data,Options).
-my_ws_receive(Ws,Data,Options):- ws_receive(Ws,Data,Options).
-
-undict(ID,IDO):- is_dict(ID),ID.IDK=IDV,IDK=id,IDO=IDV.
-undict(ID,ID).
-
-discord_websocket_hook_1(_,_):- remember_task(handle_discord_websocket_events),fail.
-discord_websocket_hook_1(Type,Message):- \+ atomic(Message),!,writeln(user_error,discord_event(Type,Message)),discord_event(Type,Message).
-discord_websocket_hook_1(onMessage,Message):- atom_contains(Message,'"op":11'),!.
-%discord_websocket_hook_1(onMessage,Message):- atom_json_dict(Message,Dict,[as(string)]),!,discord_event(gateway,Dict).
-discord_websocket_hook_1(onMessage,Message):- string_to_dict(Message,Dict),!,discord_event(gateway,Dict).
-%discord_websocket_hook_1(Type,Message):- notrace_catch(atom_json_term(Message,Dict,[as(string)])),!,discord_event(Type,Dict).
-%discord_websocket_hook_1(Type,Message):-notrace_catch(atom_to_term(Message,Dict,_)),!,discord_event(Type,Dict).
-discord_websocket_hook_1(Type,Message):- writeln(user_error,discord_event(Type,Message)),discord_event(Type,Message),!.
-
-discord_reconn_after(onCreateError).
-discord_reconn_after(sendTextError).
-discord_reconn_after(onClose).
-discord_reconn_after(sendTextError).
-
-
-
-discord_event(onMessage,Data):- !,discord_event(gateway,Data).
-discord_event(Type,{O}):- !, any_to_json_dict({O},Dict),!,discord_event(Type,Dict).
-
-% OP==0 an event was dispatched.
-discord_event(_,O):- get_prop(O,op,0),get_prop(O,t,Type),get_prop(O,s,S),get_prop(O,d,Data),!,
-  discord_add(s,S),!, discord_event(Type,Data).  
-discord_event("PRESENCE_UPDATE",Data):- !, discord_addd(presence,hasMember,Data).
-discord_event(gateway,O):- get_prop(O,op,Type),!,discord_receive(Type,O),!.
-%discord_event(gateway,O):- is_dict(O),O.Key=Type,Key=id,!,discord_receive(Type,O),!.
-% simplify the data objects
-%discord_event(Type,O):- is_dict(O),O.Key=Data,Key=data,!,discord_receive(Type,Data),!.
-discord_event(Type,O):- get_prop(O,data,Data),!,discord_receive(Type,Data),!.
-% typify the data objects
-%discord_event(gateway,O):- is_dict(O),O.Key=Type,Key=type,!,discord_receive(Type,O),!.
-discord_event(_,O):- get_prop(O,type,Type),!,discord_receive(Type,O),!.
-discord_event(Evt,end_of_file):- !, throw(discord_event(Evt,end_of_file)).
-discord_event(Type,Dict):- discord_receive(Type,Dict),!.
-
-
-discord_unused(user_typing).
-discord_unused(reconnect_url).
-
-discord_receive(heartbeat_ack(11),_Data):- !.
-discord_receive(Type,Data):- number(Type), gw_op(Type,Dispatch,_,_), Type\==Dispatch,!,discord_receive(Dispatch,Data).
-discord_receive(Type,Data):- string(Data),string_to_dict(Data,Dict),!,discord_receive(Type,Dict).
-%discord_receive(Type,Data):- ddbg_always((discord_receive(Type,Data))),fail.
-discord_receive(Type,Data):- once(discord_add(Type,Data)),fail.
-discord_receive(_Type,_Data).
-
-
-discord_connect:- with_mutex(connection_mutex,discord_connect_0).
-discord_disconnect:- with_mutex(connection_mutex,discord_disconnect_0).
-discord_reconnect:- with_mutex(connection_mutex,discord_reconnect_0).
-
-
-%discord_disconnect:- \+ mutex_trylock(connection_mutex), mutex_unlock(connection_mutex).
-discord_disconnect_0:- retractall(tmp:last_disconnect(_)), get_time(Time), asserta(tmp:last_disconnect(Time)),fail.
-discord_disconnect_0:- tmp:jpl_websocket(O), catch(jpl_call(O,close,[],_),_,true), fail.
-discord_disconnect_0:- retractall(tmp:jpl_websocket(_)).
-
-% This may be triggered by several events at once (so it has to hapen at least 10 seconds appart
-discord_reconnect_0:- tmp:last_disconnect(Before), get_time(Time), Before+10 <  Time,!.
-discord_reconnect_0:- discord_disconnect_0, fail.
-discord_reconnect_0:- discord_connect_0, fail.
-discord_reconnect_0.
-
-discord_connect_0:- tmp:jpl_websocket(_),!.
-discord_connect_0:- %setenv('CLASSPATH','/opt/logicmoo_workspace/packs_sys/swicli/build/application/classes:/opt/logicmoo_workspace/packs_sys/swicli/lib/javax.websocket-api-1.0.jar'),
-  discord_get_websocket_url(URL),
-  jpl_new('PrologWebSocket',[URL,'discord_websocket_hook'],O),
-  assert(tmp:jpl_websocket(O)),!.
-
-discord_identify:- 
- discord_send(
-  {"op": 2,
-  d: {
-    "token": $token,
-    "properties": {
-      "$os": "linux",
-      "$browser": "disco",
-      "$device": "disco"
-    }, 
-  "intents": 65535
-  }
-}),
- nop(discord_add_slash).
-
-discord_add_slash:- 
- discord_http(applications/772113231757574185/command,
- [post(
- json({
-    "name": "blep",
-    "type": 1,
-    "description": "Send a random adorable animal photo",
-    "options": [
-        {
-            "name": "animal",
-            "description": "The type of animal",
-            "type": 3,
-            "required": true,
-            "choices": [
-                {
-                    "name": "Dog",
-                    "value": "animal_dog"
-                },
-                {
-                    "name": "Cat",
-                    "value": "animal_cat"
-                },
-                {
-                    "name": "Penguin",
-                    "value": "animal_penguin"
-                }
-            ]
-        },
-        {
-            "name": "only_smol",
-            "description": "Whether to show only baby animals",
-            "type": 5,
-            "required": false
-        }
-    ]
-}))]).
-discord_resume:- 
- discord_send( {
-  "op": 6,
-  d: {
-    "token": $token,
-    "session_id": $session_id,
-    "seq": $s
-  }
-}).
 
 rtrv_dm_handles:-  forall(discord_ddd(UserID,instanceOf,members), rtrv_dm_handle(UserID)).
 
@@ -677,44 +355,6 @@ from_dict(Dict,{KV,List}):- !,from_dict(Dict,KV),from_dict(Dict,{List}).
 from_dict(Dict,{KV}):- !,from_dict(Dict,KV).
 from_dict(Dict,KV):- get_kvd(KV,K,V),get_prop(Dict,K,DV),from_dict(DV,V).
 
-add_id_type(_,Type):- number(Type),!.
-add_id_type(ID,Type):- 
-  discord_set_info(ID,instanceOf,Type),
-  discord_set_info(ID,id,ID).
-
-discord_add("TYPING_START",Dict):- from_dict(Dict,[channel_id:ID,user_id:User,timestamp:Time]),!, 
-  nop(discord_addd(ID,event,at(typing_start(User),Time))).
-
-discord_add(guild_member,Data):- toplevel_prop, 
-  Data.user.id = ID, 
-  add_id_type(ID,members),
-  discord_add(ID,Data),!.
-discord_add(member,Data):- toplevel_prop,
-  Data.user.id = ID, 
-  add_id_type(ID,memberz),
-  discord_add(ID,Data),!.
-
-%discord_add(Prop,List):- discord_grouping(Prop), is_list(List),!, maplist(discord_add(Prop),List).
-discord_add(Type,Pairs):- 
-  toplevel_prop,
-  is_list(Pairs),select(KV,Pairs,Rest),
-  once(get_kvd(KV,id,ID);get_kvd(KV,"id",ID)),
-  once((add_id_type(ID,Type),discord_add(ID,Rest))),!.  
-
-discord_add(Type,Pairs):- toplevel_prop, is_list(Pairs), Pairs\==[], !, maplist(discord_add(Type),Pairs),!.
-
-discord_add(Type,KV):- get_kvd(KV,K,V), !,discord_addd(Type,K,V),!.
-discord_add(Type,Data):- toplevel_prop, is_dict(Data),dict_pairs(Data,_Tag,Pairs),!,discord_add(Type,Pairs),!.
-discord_add(CREATE,Data):- toplevel_prop, string_appended('_CREATE',CREATE,TypeS),default_guild(ID),discord_addd(ID,TypeS,Data),!.
-discord_add(UPDATE,Data):- toplevel_prop, string_appended('_UPDATE',UPDATE,TypeS),default_guild(ID),discord_addd(ID,TypeS,Data),!.
-
-%discord_add("GUILD_CREATE",{Data,Rest}):- !, discord_add("GUILD_CREATE",Data),discord_add("GUILD_CREATE",{Rest}),!.
-%discord_add("GUILD_CREATE",{Data}):- !, discord_add("GUILD_CREATE",Data).
-
-
-%discord_add(Type,{Data,Rest}):- !, discord_add(Type,Data),discord_add(Type,{Rest}).
-discord_add(Type,Data):- %retractall(tmp:discord_info(Type,_,_)),
-  discord_addd(Type,hasValue,Data),!.
 
 string_appended(Appended,STRING_CREATE,STRINGS):- 
   string(STRING_CREATE),atom_concat(STRING,Appended,STRING_CREATE),
@@ -770,120 +410,6 @@ id_to_time(ID,UTC):- integer(ID), UTC is (( ID >> 22) / 1000) + 1420070400.
 
 has_id(H):- get_prop(H,id,V),from_string(V,N),!,integer(N).
 
-:- thread_local( t_l:prop_prepend/1).
-
-discord_addd(reconnect,op,7):- discord_reconnect.
-
-discord_addd(ID,Prop,Data):- from_string(ID,ID2),ID\==ID2,!,discord_addd(ID2,Prop,Data).
-discord_addd(ID,Prop,Data):- from_string(Data,Data2),Data\==Data2,!,discord_addd(ID,Prop,Data2).
-discord_addd(Guild,presences,[H|List]):- default_guild(Guild), maplist(discord_addd(presence,hasMember),[H|List]),!.
-
-discord_addd(ID,mentions,List):- !, discord_addd(ID,recipients,List).
-
-discord_addd(ID,recipients,List):- is_list(List),maplist(discord_addd(ID,recipient),List),!.
-discord_addd(ID,recipient,Dict):- is_dict(Dict),del_dict(id,Dict,UserID,Rest),!,discord_add(UserID,Rest),
-   discord_addd(ID,recipient,UserID).
-
-discord_addd(ID,recipient,UserID):- integer(UserID),
-  forall(id_to_name(UserID,Name),discord_addd(ID,recipient_name,Name)),
-  fail.
-
-discord_addd(ID,attachments,List):- is_list(List),maplist(discord_addd(ID,attachment),List).
-discord_addd(ID,attachment_url,URL):- notrace_catch(http_open:http_get(URL,Data,[])), 
-  once(discord_addd(ID,attached_content,Data)),fail.
-
-discord_addd(ID,content,Data):- Data \== "",
-  add_discord_chat_event(ID,content(Data)),fail.
-
-discord_addd(ID,embeds,Data):- Data \== [],
-  add_discord_chat_event(ID,embeds(Data)),fail.
-
-discord_addd(ID,attached_content,Data):- Data \== "",
-  add_discord_chat_event(ID,content(Data)),fail.
-
-
-discord_addd(ID,user,Data):- 
-  is_dict(Data),
-  once(discord_add(ID,Data)),fail.
-
-discord_addd(MID,channel_id,CID):-
-  add_id_type(CID,channels),
-  add_id_type(MID,messages),
-  discord_ddd(MID,author_username,Who),
-  without_ddbg(discord_addd(CID,user_seen,Who)),
-  fail.
-
-discord_addd(_CID,last_message_id,MID):- MID\==null, add_id_type(MID,messages),fail.
-
-
-discord_addd(Guild,hasValue,List):- default_guild(Guild),is_list(List),!, maplist(discord_add(Guild),List).
-
-
-discord_addd(presence,hasMember,Dict):- Dict.user.id = ID,!,
-  without_ddbg(discord_add(ID,Dict)).
-
-discord_addd(ID,referenced_message,Dict):- is_dict(Dict), Dict.id = MID, !,
-  discord_addd(ID,referenced_message,MID),
-  discord_add(MID, Dict).
-
-
-
-discord_addd(Guild,Prop,[H|List]):- default_guild(Guild), % discord_grouping(Prop), 
-  is_list(List),
-  \+ \+ has_id(H),!,
-  maplist(discord_add(Prop),[H|List]),!.
-
-discord_addd(Guild,members,[H|List]):- default_guild(Guild), % discord_grouping(Prop), 
-  is_list(List), maplist(discord_add(guild_member),[H|List]),!.
-
-  
-
-discord_addd(_,op,10):- !, discord_identify.
-
- 
- 
-
-discord_addd(ID,Prop,Dict):- atom(Prop), once(t_l:prop_prepend(Pre)), Pre\=='',
- atomic_list_concat([Pre,Prop],'_',PreProp),!,
- locally(t_l:prop_prepend(''), discord_addd(ID,PreProp,Dict)).
-
-discord_addd(ID,Author,Dict):- maybe_prepend(Author), integer(ID), toplevel_prop, is_dict(Dict),!,
- dict_pairs(Dict,_,Pairs),
- locally(t_l:prop_prepend(Author),maplist(discord_add(ID),Pairs)).
-
-%discord_addd(ID,user_username,Dict):- !, discord_set_info(ID,name,Dict).
-%discord_addd(ID,username,Dict):- !, discord_set_info(ID,name,Dict).
-discord_addd(ID,Prop,Dict):- discord_set_info(ID,Prop,Dict),!.
-
-discord_set_info(ID,Prop,Data):- 
- once(Prop==hasValue ; (number(Data),get_time(Time),Data<Time)),
- \+ tmp:discord_info(ID,Prop,Data),
- retractall(tmp:discord_info(ID,Prop,_)),fail.
-discord_set_info(_,Prop,Data):- default_info(Prop,Data),!.
-discord_set_info(ID,Prop,Data):-
-  TmpR=tmp:R,
-  R= discord_info(ID,Prop,Data),
-  (\+ \+ call(TmpR) -> (retract(TmpR),asserta(TmpR),nop(ddbg(discord_keep_info(ID,Prop,Data)))) 
-   ; (asserta(TmpR),on_new_ddd(ID,Prop,Data))).
-
-on_new_ddd(ID,Prop,Data):-
-  ddbg(discord_addd(ID,Prop,Data)),
-  ignore((Data==threads->discord_join_subchannel(ID))).
-
-maybe_prepend(author).
-maybe_prepend(user).
-maybe_prepend(recipients).
-maybe_prepend(referenced_message):-!,fail.
-maybe_prepend(message_reference).
-%maybe_prepend(Atom):- atom(Atom).
-
-get_discord(ID,Data):- discord_ddd(ID,hasValue,Data).
-get_discord(ID,Prop,Value):- discord_ddd(ID,Prop,Value)*->true;get_discord2(ID,Prop,Value).
-
-get_discord2(Type,Prop,Value):- discord_ddd(Type,hasValue,ID),discord_ddd(ID,Prop,Value).
-
-get_discord_info(ID,Prop,Data):- discord_ddd(ID,Prop,Data)*-> true;
-  (\+ integer(ID), \+ var(ID), any_to_id(ID,ID2),!, discord_ddd(ID2,Prop,Data)).
 
 %check_unifier(U1,U2):- nonvar(U1),var(U2),!,freeze(U2,check_unifier_final(U1,U2)).
 %check_unifier(U2,U1):- nonvar(U1),var(U2),!,freeze(U2,check_unifier_final(U1,U2)).
@@ -933,13 +459,6 @@ any_to_id(Name,ID):- from_string(Name,ID),integer(ID),!.
 
 same_ids(ID,IDS):-any_to_id(ID,IDA),any_to_id(IDS,IDB),IDA==IDB.
 
-discord_ensure_im2(ID,IM):- get_discord(IM,user,ID),!.
-
-discord_ensure_im(To,IM):- get_discord(IM, name, To), get_discord(IM, is_channel, true),!.
-discord_ensure_im(To,IM):- any_to_id(To,ID),!, discord_ensure_im(ID,IM).
-discord_ensure_im(To,IM):- discord_ensure_im2(To,IM),!.
-% OLD discord_ensure_im(To,IM):- any_to_id(To,ID), discord_send({type:'im_open',user:ID}),!,must(discord_ensure_im2(To,IM)),!.
-discord_ensure_im(To,IM):- discord_send({type:'conversations_open',users:To}),!,must(discord_ensure_im2(To,IM)),!.
 
 
 discord_id_time(ID,TS):-flag(discord_id,OID,OID+1),ID is OID+1,get_time(Time),number_string(Time,TS).
@@ -955,7 +474,8 @@ matches_info(S,Str):- sub_string(S, _Offset0, _Length, _After, Str).
 as_msg_string(call(Msg),Str):- wots(SF,call(Msg)),!,as_msg_string(SF,Str).
 as_msg_string(Msg,Str):- compound(Msg),wots(SF,print_tree(Msg)),!,as_msg_string(SF,Str).
 as_msg_string(Msg,Str):- string(Msg),!,Msg=Str.
-as_msg_string(Msg,Str):- any_to_string(Msg,SF),as_msg_string(SF,Str).
+as_msg_string(Msg,Str):- notrace_catch(text_to_string(Msg,SF)),!,as_msg_string(SF,Str).
+as_msg_string(Msg,Str):- any_to_string(Msg,SF),!,as_msg_string(SF,Str).
 
 
 backquote_multiline_string(Msg,Str):- \+ atom_contains(Msg,'```'), \+ atom_contains(Msg,'||'),  atom_contains(Msg,'\n'), sformat(Str,'```~w```',[Msg]),!.
@@ -1005,80 +525,6 @@ use_file_upload(Str):- atomic_list_concat(Lines,'\n',Str),!,length(Lines,L), L>7
 
 is_guild_chan(ID):- (discord_ddd(ID,parent_id,PID),PID\==null,PID>0).
 
-discord_say(X):- discord_say('dmiles',X),discord_say('prologmud_bot_testing',X).
-% https://discord.com/oauth2/authorize?client_id=772113231757574185&scope=bot&permissions=268823638
-
-
-discord_say(Channel,Msg):- atom_or_string(Channel),atom_number(Channel,ID),!,discord_say(ID,Msg).
-discord_say(Channel,Msg):- \+ integer(Channel),any_to_chan_id(Channel,ID),!,discord_say(ID,Msg).
-discord_say(MID,Msg):- discord_name_id_type(Name,MID,members),any_to_chan_id(Name,ID),!,discord_say_text(ID,Msg,[]).
-discord_say(MID,Msg):- \+ discord_id_type(MID,channels), discord_ddd(MID,channel_id,ID), 
-   %(is_guild_chan(ID) -> default_guild(GID); GID=0),!,
-    discord_say_text(ID,Msg,_{message_reference:_{message_id: MID}}),!.
-discord_say(ID,Msg):- discord_say_text(ID,Msg,[]),!.
-
-add_to_dict(Dict,[],Dict):-!.
-add_to_dict(Dict,[Add|Mentions],NewDict):-
-  add_to_dict(Dict,Add,MDict),
-  add_to_dict(MDict,Mentions,NewDict),!.
-add_to_dict(Dict,ADict,NewDict):- is_dict(ADict),dict_pairs(ADict,_,List),!,add_to_dict(Dict,List,NewDict).
-add_to_dict(Dict,KV,NewDict):- get_kvd(KV,K,V), get_dict(K,Dict,Old),is_dict(Old),add_to_dict(Old,V,New),
-  put_dict(K,Dict,New,NewDict).
-add_to_dict(Dict,KV,NewDict):- get_kvd(KV,K,V),put_dict(K,Dict,V,NewDict).
- 
-
-
-discord_say_text(Channel,Msg, AddMentions):- use_file_upload(Msg),
- add_to_dict(_{content: ""},AddMentions,NewDict),
- tmp_file('discord_say',Tmp), atom_concat(Tmp,'.txt',File),
- setup_call_cleanup(
-   setup_call_cleanup(open(File,write,O),write(O,Msg),close(O)),
-   discord_say_file(Channel,File,NewDict),
-   delete_file(File)),!.
-
-discord_say_text(Channel,Msg, AddMentions):-  backquote_multiline_string(Msg,Str), !,
-   add_to_dict(_{content: Str},AddMentions,NewDict),
-   discord_http(channels/Channel/messages,[post(json(NewDict))]),!.
-
-json_to_string(JSON,Str):- wots(Str,json_write(current_output,JSON,[])).
-
-atom_or_string(S):- atom(S);string(S).
-
-% todoo fix this!
-discord_say_file(ID,File,JSON):- fail,
-  discord_http(channels/ID/messages,[
-       post([ payload_json =  json(JSON),
-              filename     =  file(File)])]),!.
-discord_say_file(Channel,File,JSON):-  
- bot_discord_token(Token),
- json_to_string(JSON,Str),
- sformat(S,
-   "curl -H 'Authorization: ~w' -H 'User-Agent: DiscordBot' -F 'payload_json=~w' -F 'filename=@~w' ~w/channels/~w/messages",
-   [Token,Str,File,"https://discord.com/api/v9", Channel]), catch(shell(S),E,(wdmsg(E=S),fail)),!.
-/*
-   @TODO remove the shell/1 above and do something like..  
-
-    discord_http(channels/ID/messages,[
-       post([ payload_json =  json(_{content: ""}),
-              filename     =  file(File)])]).
-
-  (crazy we have no examples anywhere of file upload?!)
-
-*/
-
-
-
-
-/*
-  Dict=
-    _{content: StrO,
-      
-    %embeds: [_{ title: "Hello, Embed!", description: "This is an embedded message."},
-    tts: false},
- %sformat(S,'~q',[Dict]),
- %ddbg_always(post=S),
- discord_http(channels/ID/messages,[post(json(Dict))]),!.
-*/
 
 dict_append_curls(Dict,Params,NewDict):-any_to_curls(Params,Curly), dict_append_curls3(Dict,Curly,NewDict).
 
@@ -1087,43 +533,6 @@ dict_append_curls3(Dict,{Curly},NewDict):-!,dict_append_curls3(Dict,Curly,NewDic
 dict_append_curls3(Dict,(A,B),NewDict):-!,dict_append_curls3(Dict,A,NewDictM),dict_append_curls3(NewDictM,B,NewDict).
 dict_append_curls3(Dict,KS:V,NewDict):- string_to_atom(KS,K), put_dict(K,Dict,V,NewDict).
 
-
-bot_discord_token(TokenHeader):- tmp:discord_token(Token),sformat(TokenHeader,"Bot ~w",[Token]).
-
-
-type_to_url("message",'chat.postMessage').
-type_to_url("im_open",'im.open').
-type_to_url("conversations_open",'conversations.open').
-type_to_url(X,X):-!.
-
-make_url_params({In},Out):-!,make_url_params(In,Out).
-make_url_params((A,B),Out):-!,make_url_params(A,AA),make_url_params(B,BB),format(atom(Out),'~w&~w',[AA,BB]).
-make_url_params([A|B],Out):-!,make_url_params(A,AA),make_url_params(B,BB),format(atom(Out),'~w&~w',[AA,BB]).
-make_url_params([A],Out):-!,make_url_params(A,Out).
-make_url_params(KV,Out):-get_kvd(KV,K,A),www_form_encode(A,AA),format(atom(Out),'~w=~w',[K,AA]).
-
-
-discord_send(DataI):- any_to_curls(DataI,Data),discord_send000(Data).
-%discord_send_receive(DataI,Recv):- any_to_curls(DataI,Data),discord_send_receive000(Data,Recv).
-
-% @TODO comment the above and fix this next block
-discord_send000(Data):-  discord_send_ws(_WebSocket,Data),!.
-
-
-discord_send_ws(WebSocket,Data):- 
-  with_output_to(atom(S),writeq(Data)), tmp:jpl_websocket(WebSocket),!,jpl_call(WebSocket,send_message,[S],_),!. 
-discord_send_ws(WebSocket,Data):- 
-  tmp:discord_websocket(WebSocket, _WsInput, WsOutput), !,  
- must_det_l((flush_output(WsOutput),
-  wdmsg(ws_send(WsOutput,text(Data))),
-  ws_send(WsOutput,text(Data)),!,flush_output(WsOutput))),!.
-
-discord_send_ws(WebSocket,Data):- 
-  tmp:discord_websocket(WebSocket, _WsInput, WsOutput), !,  
- must_det_l((flush_output(WsOutput), any_to_json_dict(Data,Dict),
-  wdmsg(ws_send(WsOutput,json(Dict))),
-  ws_send(WsOutput,json(Dict)),!,flush_output(WsOutput))),!.
-%discord_send_ws(WsOutput,Data):- is_stream(WsOutput), format(WsOutput,'~q',[Data]),flush_output(WsOutput),ddbg_always(discord_sent(Data)),flush_output.
 
 any_to_json_dict(D,D):- is_dict(D,_),!. 
 any_to_json_dict(List,Dict):- is_list(List),dict_create(Dict,_,List),!.
@@ -1157,90 +566,26 @@ any_to_curls(A,O):- string(A),!,from_string(A,O).
 any_to_curls(A,O):- maybe_into_string(A,AA),!,any_to_curls(AA,O).
 any_to_curls(A,O):- from_string(A,O).
 
-%gw_op(0,'dispatch','receive','an event was dispatched.').
-%gw_op(1,'heartbeat',_,'fired periodically by the client to keep the connection alive.').
-gw_op(2,'identify','send','starts a new session during the initial handshake.').
-gw_op(3,'presence update','send','update the client''s presence.').
-gw_op(4,'voice state update','send','used to join/leave or move between voice channels.').
-gw_op(6,'resume','send','resume a previous session that was disconnected.').
-gw_op(7,'reconnect','receive','you should attempt to reconnect and resume immediately.').
-gw_op(8,'request guild members','send','request information about offline guild members in a large guild.').
-gw_op(9,'invalid session','receive','the session has been invalidated. you should reconnect and identify/resume accordingly.').
-gw_op(10,'hello','receive','sent immediately after connecting and contains the heartbeat_interval to use.').
-gw_op(11,heartbeat_ack(11),'receive','sent in response to receiving a heartbeat to acknowledge that it has been received.').
-
 get_emojis:- discord_http(guilds/{guilds-id}/emojis).
 
 default_guild(748871194572226661).
 default_guild("GUILD_CREATE").
 
+no_default_info(bot). 
 no_default_info(topic). no_default_info(position). no_default_info(parent_id). % no_default_info(s).
 no_default_info(id). no_default_info(instanceOf). no_default_info(type). no_default_info(hasValue).
 
-default_info(hasValue,[]).
-default_info(X,_):- nonvar(X), no_default_info(X),!,fail.
-default_info(flags,0). % probably this doesnt belong
-default_info(accent_color,null). default_info(attachments,[]). default_info(avatar,null).
-default_info(banner,null). default_info(banner_color,null). default_info(components,[]).
-default_info(edited_timestamp,null). default_info(embeds,[]). 
-default_info(guild_id,GuildID):- default_guild(GuildID).
-default_info(last_message_id,null). default_info(mention_everyone,false). default_info(mention_roles,[]).
-default_info(mentions,[]). default_info(nsfw,false). default_info(permission_overwrites,[]).
-default_info(pinned,false). default_info(rate_limit_per_user,0). default_info(rtc_region,null).
-default_info(tts,false). default_info(type,0). default_info(user_limit,0). default_info(public_flags,0).
-default_info(email,null). default_info(features,[]). default_info(messages,[]). default_info(owner,false).
-default_info(X,Y):- default_info_value(Y),!, nop(dmsg(default_info(X,Y))).
-
-default_info_value(null).
-default_info_value(0).
-default_info_value([]).
-default_info_value(false).
-
 %:- autoload_all.
-discord_restore_1:- 
-  discord_add(s,null),
-  bot_discord_token(TokenHeaderB), discord_add(bot_token,TokenHeaderB),
+discord_restore_1:-
+ without_ddbg((
+  bot_token_string(TokenHeaderB), discord_add(bot_token,TokenHeaderB),
   discord_token_string(TokenHeader), discord_add(token,TokenHeader),
-  get_time(Time), ITime is integer(Time), discord_add(time,ITime).
+  get_time(Time), ITime is integer(Time), discord_add(time,ITime))).
 
 :- if( \+ prolog_load_context(reloading, true)).
 :- discord_restore_1.
 :- endif.
-:- initialization(discord_restore_1,program).
-
-discord_say :- discord_say('prologmud_bot_testing',"test message to prologmud_bot_testing").
-discord_say0:- 
- discord_say( asserted( exists( Y2,
-                                   ( info( 'XVAR_NP_X_1_1', [
-                                       loc(1), pos('NP'),equals('XVAR_NP_X_1_1'),
-                                       words([w(x,[alt(pos(nn)),root(x),pos(nnp),loc(1),lnks(2),txt("X"),truecase('LOWER'),link(1,'NP',r('NP',seg(1,1))),link(2,'S',r('S',seg(1,3))),lex_winfo])]), seg(1,1),phrase('NP'),size(1),lnks(1),
-                                       #(r('NP',seg(1,1))),txt(["X"]),childs(0),
-                                       link(1,'S',r('S',seg(1,3)))])  ,
-                                     span( [ seg(1,3), phrase('S'),size(3),lnks(0),#(r('S',seg(1,3))),
-                                             txt(["X","is","Y"]),childs(2),
-                                             child(1,'NP',r('NP',seg(1,1))),
-                                             child(2,'VP',r('VP',seg(2,3)))]) ,
-                                     span( [ seg(2,3), phrase('VP'),size(2),lnks(1),
-                                             #(r('VP',seg(2,3))),txt(["is","Y"]),
-                                             childs(1),child(1,'VP',r('VP',seg(3,3))),
-                                             link(1,'S',r('S',seg(1,3)))]) ,
-                                     span( [ seg(3,3), phrase('VP'),size(1),lnks(2),
-                                             #(r('VP',seg(3,3))),txt(["Y"]),childs(0),
-                                             link(1,'VP',r('VP',seg(2,3))),link(2,'S',r('S',seg(1,3)))]) ,
-                                     iza(Y2,'Y') ,
-                                     equalsVar(Y2,'XVAR_NP_X_1_1'))))).
-
-
-
-discord_say1:- discord_say(call(ls)).
-discord_say2:- forall(discord_say2(X),discord_say2a(X)).
-discord_say3:- discord_say("|| || \n spoiler\n||line 1||\n||line 2||\nexcera").
-
-
-discord_say2(232781767809957888). discord_say2('#prologmud_bot_testing'). discord_say2('dmiles'). discord_say2('@dmiles').
-discord_say2("dmiles"). discord_say2("@dmiles"). discord_say2('prologmud_bot_testing').
-discord_say2a(X):- sformat(S,"test message to ~q.",[X]), discord_say(X,S).
-
+:- initialization(discord_restore_1).
 
 discord_restore_2:- discord_connect.
 :- initialization(discord_restore_2).
@@ -1268,4 +613,124 @@ discord_restore_2:- discord_connect.
 :- eggdrop:import(discord_client:discord_chat_override/1).
 
 
+end_of_file.
 
+
+https://discord.com/api/oauth2/authorize?client_id=772113231757574185&scope=bot&permissions=1
+
+Name=logicmoo-app
+USERNAME=PrologMUD#4124
+PERMISSION=536536415425
+Public=63920eac424255a5a57fc6b48a7c958c46621ab18505506b1d3fa32f3708e638
+Client=772113231757574185
+Channel=892809238710222930
+Token=
+
+
+curl -v -H "Authorization: Bot $AUTH_TOK" -H "User-Agent: curl" -H "Content-Type: application/json" -XGET https://discord.com/api/v9/channels/892809238710222930/messages
+curl -v -H "Authorization: $AUTH_TOKEN" -H "User-Agent: DiscordBot" -H "Content-Type: application/json" -H "Content-Length: 0" -X GET https://discord.com/api/channels/892809238710222930/messages
+
+{
+  "token_type": "Bearer",
+  "access_token": "GNaVzEtATqdh173tNHEXY9ZYAuhiYxvy",
+  "scope": "webhook.incoming",
+  "expires_in": 604800,
+  "refresh_token": "PvPL7ELyMDc1836457XCDh1Y8jPbRm",
+  "webhook": {
+    "application_id": "310954232226357250",
+    "name": "testwebhook",
+    "url": "https://discord.com/api/webhooks/347114750880120863/kKDdjXa1g9tKNs0-_yOwLyALC9gydEWP6gr9sHabuK1vuofjhQDDnlOclJeRIvYK-pj_",
+    "channel_id": "345626669224982402",
+    "token": "kKDdjXa1g9tKNs0-_yOwLyALC9gydEWP6gr9sHabuK1vuofjhQDDnlOclJeRIvYK-pj_",
+    "type": 1,
+    "avatar": null,
+    "guild_id": "290926792226357250",
+    "id": "347114750880120863"
+  }
+}
+
+curl -v -H "Authorization: XXX" -H "User-Agent: curl" -H "Content-Type: application/json" -H "Content-Length: 0" -X GET https://discord.com/api/v9/channels/892809238710222930/messages
+
+
+From this object, you
+
+
+https://discord.com/api/oauth2/authorize?response_type=code&client_id=772113231757574185&scope=webhook.incoming&state=15773059ghq9183habn&redirect_uri=https%3A%2F%2Fnicememe.website
+
+
+
+ {
+    "application": {
+        "id": "772113231757574185",
+        "name": "AIRHORN SOLUTIONS",
+        "icon": "f03590d3eb764081d154a66340ea7d6d",
+        "description": "",
+        "summary": "",
+        "hook": true,
+        "bot_public": true,
+        "bot_require_code_grant": false,
+        "verify_key": "c8cde6a3c8c6e49d86af3191287b3ce255872be1fff6dc285bdb420c06a2c3c8"
+    },
+    "scopes": [
+        "guilds.join",
+        "identify"
+    ],
+    "expires": "2021-01-23T02:33:17.017000+00:00",
+    "user": {
+        "id": "268473310986240001",
+        "username": "Discord",
+        "avatar": "f749bb0cbeeb26ef21eca719337d20f1",
+        "discriminator": "0001",
+        "public_flags": 131072
+    }
+}
+
+
+
+// This is a message
+{
+    "content": "Mason is looking for new arena partners. What classes do you play?",
+    "components": [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 3,
+                    "custom_id": "class_select_1",
+                    "options":[
+                        {
+                            "label": "Rogue",
+                            "value": "rogue",
+                            "description": "Sneak n stab",
+                            "emoji": {
+                                "name": "rogue",
+                                "id": "625891304148303894"
+                            }
+                        },
+                        {
+                            "label": "Mage",
+                            "value": "mage",
+                            "description": "Turn 'em into a sheep",
+                            "emoji": {
+                                "name": "mage",
+                                "id": "625891304081063986"
+                            }
+                        },
+                        {
+                            "label": "Priest",
+                            "value": "priest",
+                            "description": "You get heals when I'm done doing damage",
+                            "emoji": {
+                                "name": "priest",
+                                "id": "625891303795982337"
+                            }
+                        }
+                    ],
+                    "placeholder": "Choose a class",
+                    "min_values": 1,
+                    "max_values": 3
+                }
+            ]
+        }
+    ]
+}

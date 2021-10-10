@@ -48,7 +48,8 @@ public class PrologWebSocket {
         this(URI.create(wsurl), callback, -1);
     }
 
-
+    public PrologWebSocket() {
+    }
     public PrologWebSocket(String wsurl, String callback, int bufsize) throws IOException, DeploymentException {
         this(URI.create(wsurl), callback, bufsize);
     }
@@ -66,14 +67,16 @@ public class PrologWebSocket {
             container.setDefaultMaxTextMessageBufferSize(size);
             //container.setDefaultInboundMessageSizeLimit(size);
             //((ClientEndpoint)this).setInboundMessageSizeLimit(java.lang.Integer.MAX_VALUE);
-
             userSession=container.connectToServer(this, endpointURI);
+	    callback("onCreateSuccess", this);
         } catch ( Error t ) {
             if (DEBUG>0) t.printStackTrace();
+	    System.exit(1);
 	    throw t;
         } catch ( Throwable t ) {
             if (DEBUG>0) t.printStackTrace();
-           // callback("onCreateError", t);
+            callback("onCreateError", t);
+	    System.exit(1);
         }
     }
 
@@ -187,10 +190,17 @@ public class PrologWebSocket {
         if (DEBUG>1) System.err.println("sending: " + m);
         try {
             this.userSession.getAsyncRemote().sendText(m);
-        } catch ( Throwable t ) {
-            if (DEBUG>0) t.printStackTrace();
-            callback("sendTextError", t);
-        }
+
+	} catch ( NullPointerException t ) {
+	    t.printStackTrace();
+	    callback("sendTextError", t);
+	    if (!DEAD) {
+		throw t;
+	    }
+	} catch ( Throwable t ) {
+	    if (DEBUG>0) t.printStackTrace();
+	    callback("sendTextError", t);
+	}
     }
 
     private static Object waitLock = new Object();
