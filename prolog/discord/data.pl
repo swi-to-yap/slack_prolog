@@ -1,3 +1,7 @@
+:- if(current_prolog_flag(xref,true);(prolog_load_context(file,F),prolog_load_context(source,F))).
+:- module(discord_data,[]).
+:- endif.
+
 :- multifile(tmp:discord_info/3).
 :- volatile(tmp:discord_info/3).
 :- dynamic(tmp:discord_info/3).

@@ -1,3 +1,6 @@
+:- if(current_prolog_flag(xref,true);(prolog_load_context(file,F),prolog_load_context(source,F))).
+:- module(discord_chat,[]).
+:- endif.
 % ====================================
 % Discord Chat Calls
 % ====================================

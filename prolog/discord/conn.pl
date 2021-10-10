@@ -1,3 +1,6 @@
+:- if(current_prolog_flag(xref,true);(prolog_load_context(file,F),prolog_load_context(source,F))).
+:- module(discord_conn,[]).
+:- endif.
 
 :- use_module(library(http/http_open)).
 :- use_module(library(http/http_client)).

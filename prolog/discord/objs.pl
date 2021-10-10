@@ -1,3 +1,6 @@
+:- if(current_prolog_flag(xref,true);(prolog_load_context(file,F),prolog_load_context(source,F))).
+:- module(discord_objs,[]).
+:- endif.
 
 :- if(exists_source(library(udt))).
     :- use_module(library(udt)).

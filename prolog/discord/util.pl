@@ -1,13 +1,16 @@
+:- if(current_prolog_flag(xref,true);(prolog_load_context(file,F),prolog_load_context(source,F))).
+:- module(discord_uitl,[]).
+:- endif.
 % ===============================================
 % Utility functions
 % ===============================================
+% convert snowflake timestamps
+id_to_time(ID,UTC):- integer(ID), UTC is (( ID >> 22) / 1000) + 1420070400.
+
 %int_to_date(S,V):- stamp_date_time(S,Date,local),!, format_time(string(V),'%a, %d %b %Y %T PST',Date,posix).
 int_to_date(S,V):- stamp_date_time(S,Date,local),!, format_time(string(V),':%Y:%b:%d:%T',Date,posix).
 
-% snowflake timestamps
-id_to_time(ID,UTC):- integer(ID), UTC is (( ID >> 22) / 1000) + 1420070400.
-
-string_to_dict:-
+test_string_to_dict:-
  string_to_dict("{\"type\":\"dnd_updated_user\",\"user\":\"U3T3R279S\",\"dnd_status\":{\"dnd_enabled\":false,\"next_dnd_start_ts\":1,\"next_dnd_end_ts\":1},\"event_ts\":\"1485012634.280271\"}",Dict),
   ddbg_always(Dict).
 

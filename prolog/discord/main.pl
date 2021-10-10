@@ -1,4 +1,6 @@
-
+:- if(current_prolog_flag(xref,true);(prolog_load_context(file,F),prolog_load_context(source,F))).
+:- module(discord_main,[]).
+:- endif.
 
 discord_grouping(messages).
 discord_grouping(channels).
