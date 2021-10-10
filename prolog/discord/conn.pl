@@ -1,3 +1,20 @@
+
+:- use_module(library(http/http_open)).
+:- use_module(library(http/http_client)).
+:- use_module(library(http/http_json)).
+:- use_module(library(url)).
+:- use_module(library(http/json)).
+:- use_module(library(http/json_convert)).
+:- use_module(library(http/websocket)).
+
+:- if(exists_source(library(dicts))).
+	:- use_module(library(dicts)).
+:- endif.
+
+:- dynamic(tmp:discord_websocket_event/2).
+:- dynamic(tmp:discord_chat_event/2).
+:- dynamic(tmp:last_disconnect/1).
+
 %gw_op(0,'dispatch','receive','an event was dispatched.').
 %gw_op(1,'heartbeat',_,'fired periodically by the client to keep the connection alive.').
 gw_op(2,'identify','send','starts a new session during the initial handshake.').
@@ -11,14 +28,11 @@ gw_op(10,'hello','receive','sent immediately after connecting and contains the h
 gw_op(11,heartbeat_ack(11),'receive','sent in response to receiving a heartbeat to acknowledge that it has been received.').
 
 
-:- dynamic(tmp:discord_websocket_event/2).
-:- dynamic(tmp:discord_chat_event/2).
-:- dynamic(tmp:last_disconnect/1).
 
 % should return wss://gateway.discord.gg
 %discord_get_websocket_url('wss://127.0.0.1:50051/'):-!.
 discord_get_websocket_url('wss://gateway.discord.gg/?v=9&encoding=json'):-!.
-discord_get_websocket_url(URL):- discord_http(gateway), get_discord(url,URL).
+discord_get_websocket_url(URL):- discord_http(gateway), discord_dd(url,URL).
 
 into_discord_url_object(UCmd,Prop):- atom(UCmd),atomic_list_concat([Prop2,_|_],'?',UCmd),!,into_discord_url_object(Prop2,Prop).
 into_discord_url_object(UCmd,Prop):- atom(UCmd),atomic_list_concat([L,I|ST],'/',UCmd),
@@ -90,9 +104,9 @@ http_discord_token_string(X):- discord_token_string(X),!.
 
 
 expand_discoure_host_post(A,O):- \+ compound(A),!,A=O.
-expand_discoure_host_post('$'(A),O):- !, get_discord(A,M),expand_discoure_host_post(M,O),!.
+expand_discoure_host_post('$'(A),O):- !, discord_dd(A,M),expand_discoure_host_post(M,O),!.
 expand_discoure_host_post(A / B,O):- !, expand_discoure_host_post(A,AA),expand_discoure_host_post(B,BB),!,sformat(O,"~w/~w",[AA,BB]).
-expand_discoure_host_post({A - B},O):- !, get_discord(A,B,M),expand_discoure_host_post(M,O).
+expand_discoure_host_post({A - B},O):- !, discord_dd(A,B,M),expand_discoure_host_post(M,O).
 expand_discoure_host_post(A,O):- A=O.
 
 :- dynamic(tmp:discord_websocket/3).
@@ -245,7 +259,7 @@ discord_disconnect_0:- retractall(tmp:jpl_websocket(_)).
 discord_reconnect_0:- tmp:last_disconnect(Before), get_time(Time), Before+10 <  Time,!.
 discord_reconnect_0:- discord_disconnect_0, fail.
 discord_reconnect_0:- discord_connect_0, fail.
-discord_reconnect_0.
+discord_reconnect_0:- discord_resume.
 
 discord_connect_0:- tmp:jpl_websocket(_),!.
 discord_connect_0:- %setenv('CLASSPATH','/opt/logicmoo_workspace/packs_sys/swicli/build/application/classes:/opt/logicmoo_workspace/packs_sys/swicli/lib/javax.websocket-api-1.0.jar'),
@@ -305,6 +319,7 @@ discord_add_slash:-
         }
     ]
 }))]).
+
 discord_resume:- 
  discord_send( {
   "op": 6,

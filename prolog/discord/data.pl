@@ -1,10 +1,32 @@
 :- multifile(tmp:discord_info/3).
 :- volatile(tmp:discord_info/3).
 :- dynamic(tmp:discord_info/3).
+
+
+% ===========================
+% Data Access
+% ===========================
+
+discord_dd(ID,Data):- discord_ddd(ID,hasValue,Data).
+discord_dd(ID,Prop,Value):- discord_ddd(ID,Prop,Value)*->true;get_discord2(ID,Prop,Value).
+get_discord2(Type,Prop,Value):- discord_ddd(Type,hasValue,ID),discord_ddd(ID,Prop,Value).
+get_discord_info(ID,Prop,Data):- discord_ddd(ID,Prop,Data)*-> true;
+  (\+ integer(ID), \+ var(ID), any_to_id(ID,ID2),!, discord_ddd(ID2,Prop,Data)).
+
+discord_ddd(guilds, id, X):- default_guild(X).
+discord_ddd(A,B,C):- tmp:discord_info(A,B,C).
+discord_ddd(A,B,C):- integer(A), B == timestamp, !, id_to_time(A,C).
+
+% ===========================
+% Persistence
+% ===========================
 reload_discord_info:- reconsult(guild_info_file).
+
 %load_discord_info:- !.
 load_discord_info:- exists_file(guild_info_file)->consult(guild_info_file);true.
+
 clear_discord_info:- retractall(tmp:discord_info/3).
+
 save_discord_info:- 
  setup_call_cleanup(open(guild_info_file,write,O),
   save_discord_info(O),
@@ -48,6 +70,10 @@ show_discord_info_raw(Str):-
 :- at_halt(save_discord_info).
 :- load_discord_info.
 :- endif.
+
+% ===========================
+% Database
+% ===========================
 
 :- thread_local( t_l:prop_prepend/1).
 
@@ -105,10 +131,6 @@ discord_add(UPDATE,Data):- toplevel_prop, string_appended('_UPDATE',UPDATE,TypeS
 discord_add(Type,Data):- %retractall(tmp:discord_info(Type,_,_)),
   discord_addd(Type,hasValue,Data),!.
 
-
-
-retain_props(guild_experiments).
-retain_props(experiments).
 
 discord_addd(reconnect,op,7):- discord_reconnect.
 
@@ -178,12 +200,8 @@ discord_addd(Guild,Prop,[H|List]):- default_guild(Guild), % discord_grouping(Pro
 discord_addd(Guild,members,[H|List]):- default_guild(Guild), % discord_grouping(Prop), 
   is_list(List), maplist(discord_add(guild_member),[H|List]),!.
 
-  
-
 discord_addd(_,op,10):- !, discord_identify.
 
- 
- 
 
 discord_addd(ID,Prop,Dict):- atom(Prop), once(t_l:prop_prepend(Pre)), Pre\=='',
  atomic_list_concat([Pre,Prop],'_',PreProp),!,
@@ -215,22 +233,14 @@ on_new_ddd(ID,Prop,Data):-
   ddbg(discord_addd(ID,Prop,Data)),
   ignore((Data==threads->discord_join_subchannel(ID))).
 
+
+
 maybe_prepend(author).
 maybe_prepend(user).
 maybe_prepend(recipients).
 maybe_prepend(referenced_message):-!,fail.
 maybe_prepend(message_reference).
 %maybe_prepend(Atom):- atom(Atom).
-
-get_discord(ID,Data):- discord_ddd(ID,hasValue,Data).
-get_discord(ID,Prop,Value):- discord_ddd(ID,Prop,Value)*->true;get_discord2(ID,Prop,Value).
-
-get_discord2(Type,Prop,Value):- discord_ddd(Type,hasValue,ID),discord_ddd(ID,Prop,Value).
-
-get_discord_info(ID,Prop,Data):- discord_ddd(ID,Prop,Data)*-> true;
-  (\+ integer(ID), \+ var(ID), any_to_id(ID,ID2),!, discord_ddd(ID2,Prop,Data)).
-
-
 
 default_info(hasValue,[]).
 default_info(X,_):- nonvar(X), no_default_info(X),!,fail.
@@ -251,4 +261,10 @@ default_info_value(0).
 default_info_value([]).
 default_info_value(false).
 
+no_default_info(bot). 
+no_default_info(topic). no_default_info(position). no_default_info(parent_id). % no_default_info(s).
+no_default_info(id). no_default_info(instanceOf). no_default_info(type). no_default_info(hasValue).
+
+retain_props(guild_experiments).
+retain_props(experiments).
 

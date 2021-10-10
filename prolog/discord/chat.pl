@@ -2,11 +2,48 @@
 % Discord Chat Calls
 % ====================================
 
+dont_reply_user("PrologMUD").
+dont_reply_user("irc0").
+dont_reply_user("LM489").
+dont_reply_user("jllykifsh").
+
+add_discord_chat_event(ID,Message):- assertz(tmp:discord_chat_event(ID,Message)).
+
+handle_discord_chat_event(ID,_Message):- discord_ddd(_,referenced_message,ID),!.
+handle_discord_chat_event(ID,_Message):- discord_ddd(ID,referenced_message,_),!.
+handle_discord_chat_event(ID,content(Message)):-  
+  discord_ddd(ID,author_username,User), !, 
+  handle_discord_chat_event(ID,say(User,Message)).
+
+handle_discord_chat_event(ID,Message):- remember_task(handle_chat_events), dmsg(chat_event(ID,Message)),fail.
+handle_discord_chat_event(ID, _):- \+ number(ID),!.
+handle_discord_chat_event(_ID,say(User,_Message)):- dont_reply_user(User),!.
+handle_discord_chat_event(ID,say(User,Message)):- !,
+ trim_message(Message,Str), 
+ discord_set_typing(ID),
+ locally(t_l:discord_channel(ID),
+  without_ddbg(external_chat_event(discord_client:discord_chat_override,ID,User,say(Str)))),!,
+  flush_channel_output_buffer(ID).
+handle_discord_chat_event(ID,Message):- dmsg(failed_chat_event(ID,Message)).
+
+trim_message(A,C):- \+ string(A),!,any_to_string(A,S),trim_message(S,C).
+trim_message(A,C):- split_string(A, "", "`\s\t\n", [B]), A\==B,!,trim_message(B,C).
+trim_message(A,A).
+
+discord_set_typing(ID):- any_to_chan_id(ID,CID),ID\==CID,!,discord_set_typing(CID).
+discord_set_typing(ID):- how_long_ago(discord_set_typing(ID),Ago),number(Ago), Ago < 5,!. % only sending typing idicator every 5 seconds
+discord_set_typing(ID):- 
+  remember_task(discord_set_typing(ID)),
+  discord_http(channels/ID/typing,[method(post)]).
+
+
 :- use_module(library(eggdrop)).
 
 :- dynamic(t_l:discord_channel/1).
 :- dynamic(t_l:channel_output_buffer/2).
 
+:- meta_predicate(disco_call(:)).
+disco_call(G):- wots(S,G),discord_say(S).
 
 discord_write_done(det('Yes',_)):-!. 
 discord_write_done(Data):- write(' '),write(Data).
@@ -69,15 +106,7 @@ discord_say(MID,Msg):- \+ discord_id_type(MID,channels), discord_ddd(MID,channel
     discord_say_text(ID,Msg,_{message_reference:_{message_id: MID}}),!.
 discord_say(ID,Msg):- discord_say_text(ID,Msg,[]),!.
 
-add_to_dict(Dict,[],Dict):-!.
-add_to_dict(Dict,[Add|Mentions],NewDict):-
-  add_to_dict(Dict,Add,MDict),
-  add_to_dict(MDict,Mentions,NewDict),!.
-add_to_dict(Dict,ADict,NewDict):- is_dict(ADict),dict_pairs(ADict,_,List),!,add_to_dict(Dict,List,NewDict).
-add_to_dict(Dict,KV,NewDict):- get_kvd(KV,K,V), get_dict(K,Dict,Old),is_dict(Old),add_to_dict(Old,V,New),
-  put_dict(K,Dict,New,NewDict).
-add_to_dict(Dict,KV,NewDict):- get_kvd(KV,K,V),put_dict(K,Dict,V,NewDict).
- 
+
 
 discord_say_text(Channel,Msg):- any_to_chan_id(Channel,ID), discord_say_text(ID,Msg, []).
 
@@ -87,9 +116,9 @@ discord_say_text(Channel,Msg, AddMentions):- backquote_multiline_string(Msg,Str)
    add_to_dict(_{content: Str},AddMentions,NewDict),
    discord_http(channels/Channel/messages,[post(json(NewDict))]),!.
 
-json_to_string(JSON,Str):- wots(Str,json_write(current_output,JSON,[])).
+use_file_upload(Str):- atom_length(Str,L),L>1500,!.
+use_file_upload(Str):- atomic_list_concat(Lines,'\n',Str),!,length(Lines,L), L>7. 
 
-atom_or_string(S):- atom(S);string(S).
 
 discord_say_text_as_file(Channel,Msg):- any_to_chan_id(Channel,ID), discord_say_text_as_file(ID,Msg, []).
 discord_say_text_as_file(Channel,Msg, AddMentions):-
@@ -113,18 +142,6 @@ discord_say_file(Channel,File,JSON):-
  sformat(S,
    "curl -H 'Authorization: ~w' -H 'User-Agent: DiscordBot' -F 'payload_json=~w' -F 'filename=@~w' ~w/channels/~w/messages",
    [Token,Str,File,"https://discord.com/api/v9", Channel]), catch(shell(S),E,(wdmsg(E=S),fail)),!.
-/*
-   @TODO remove the shell/1 above and do something like..  
-
-    discord_http(channels/ID/messages,[
-       post([ payload_json =  json(_{content: ""}),
-              filename     =  file(File)])]).
-
-  (crazy we have no examples anywhere of file upload?!)
-
-*/
-
-
 
 
 /*
@@ -172,4 +189,37 @@ discord_say2(232781767809957888). discord_say2('#prologmud_bot_testing'). discor
 discord_say2("dmiles"). discord_say2("@dmiles"). discord_say2('prologmud_bot_testing').
 discord_say2a(X):- sformat(S,"test message to ~q.",[X]), discord_say(X,S).
 
+
+as_msg_string(call(Msg),Str):- wots(SF,call(Msg)),!,as_msg_string(SF,Str).
+as_msg_string(Msg,Str):- compound(Msg),wots(SF,print_tree(Msg)),!,as_msg_string(SF,Str).
+as_msg_string(Msg,Str):- string(Msg),!,Msg=Str.
+as_msg_string(Msg,Str):- notrace_catch(text_to_string(Msg,SF)),!,as_msg_string(SF,Str).
+as_msg_string(Msg,Str):- any_to_string(Msg,SF),!,as_msg_string(SF,Str).
+
+
+backquote_multiline_string(Msg,Str):- \+ atom_contains(Msg,'```'), \+ atom_contains(Msg,'||'),  atom_contains(Msg,'\n'), sformat(Str,'```~w```',[Msg]),!.
+backquote_multiline_string(Msg,Msg).
+
+%discord_say:- discord_say(_,'From Prolog').
+% {"id":3,"type":"message","channel":"D3U47CE4W","text":"hi there"}
+
+/*
+discord_say(ID,Str):- atom_length(Str,L),L>20,!,
+  sub_string(Str,0,100,_,Sub),
+  replace_in_string(['"'='\\"'],Sub,SubR),
+  sformat(S,'--boundary
+Content-Disposition: form-data; name="payload_json"
+Content-Type: application/json
+{ "content": "~w" }
+--boundary
+Content-Disposition: form-data; name="file"; filename="discord_say.txt"
+Content-Type:application/octet-stream
+~w
+--boundary--
+',[SubR,Str]),
+   replace_in_string(['\n'='\r\n"'],Sub,SubR),
+    discord_http(channels/ID/messages,[post(S)]).
+*/
+
+:- eggdrop:import(discord_client:discord_chat_override/1).
 
